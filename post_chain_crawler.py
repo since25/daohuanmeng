@@ -1,60 +1,25 @@
 import argparse
 import json
-import ssl
 import sys
 import time
 from typing import Callable, Optional
-from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
+from urllib.request import build_opener
 
-from backend.parser import extract_html_redirect_url, parse_article_page as parse_post_page
+from backend.http_client import HttpClient
+from backend.parser import parse_article_page as parse_post_page
+
+
+class _CliHttpClient(HttpClient):
+    def _build_opener(self, *handlers):
+        return build_opener(*handlers)
 
 
 def fetch_html_via_proxy(url: str, proxy: Optional[str], timeout: float = 30.0) -> str:
-    context = ssl._create_unverified_context()
-    handlers = [HTTPSHandler(context=context)]
-    if proxy:
-        handlers.append(ProxyHandler({"http": proxy, "https": proxy}))
-
-    opener = build_opener(*handlers)
-    request = Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
-            )
-        },
-    )
-    with opener.open(request, timeout=timeout) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset, errors="replace")
+    return _CliHttpClient(proxy=proxy, timeout=timeout).fetch_html(url)
 
 
 def resolve_url_via_proxy(url: str, proxy: Optional[str], timeout: float = 30.0) -> str:
-    context = ssl._create_unverified_context()
-    handlers = [HTTPSHandler(context=context)]
-    if proxy:
-        handlers.append(ProxyHandler({"http": proxy, "https": proxy}))
-
-    opener = build_opener(*handlers)
-    request = Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
-            )
-        },
-    )
-    with opener.open(request, timeout=timeout) as response:
-        final_url = response.geturl()
-        charset = response.headers.get_content_charset() or "utf-8"
-        body = response.read().decode(charset, errors="replace")
-
-    html_redirect_url = extract_html_redirect_url(body)
-    if html_redirect_url:
-        return html_redirect_url
-    return final_url
+    return _CliHttpClient(proxy=proxy, timeout=timeout).resolve_final_url(url)
 
 
 def crawl_post_chain(
@@ -112,10 +77,11 @@ def main(argv=None) -> int:
         print("--max-pages must be >= 1", file=sys.stderr)
         return 2
 
+    client = _CliHttpClient(proxy=args.proxy)
     pages = crawl_post_chain(
         args.start,
-        fetch_html=lambda url: fetch_html_via_proxy(url, args.proxy),
-        resolve_url=lambda url: resolve_url_via_proxy(url, args.proxy),
+        fetch_html=client.fetch_html,
+        resolve_url=client.resolve_final_url,
         max_pages=args.max_pages,
         delay_seconds=args.delay,
     )
