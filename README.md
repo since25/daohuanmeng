@@ -384,6 +384,32 @@ curl -skL --proxy http://127.0.0.1:28880 "https://daoyu.fan/57517.html" -o /tmp/
 ]
 ```
 
+## 分类页批量采集与导入
+
+`category_link_collector.py` 可以从分类分页里采集 `h2.entry-title a` 的标题和文章 URL。这个步骤只做普通 HTTP 请求，不走本地 MITM rewrite。
+
+```bash
+.venv/bin/python category_link_collector.py \
+  --base-url "https://daoyu.fan/category/dou-yin-fan-cha/page/{page}" \
+  --page-range 1:35 \
+  --sleep 2 \
+  --output exports/dou-yin-fan-cha-1-35.json
+```
+
+输出格式：
+
+```json
+[
+  {
+    "source_page": 1,
+    "title": "宫徵羽合集",
+    "url": "https://daoyu.fan/45790.html"
+  }
+]
+```
+
+控制台左侧的 `批量导入` 区域可以粘贴这个 JSON，或直接选择 JSON 文件。点击 `启动批量` 后，后端会创建 batch job，并按导入顺序逐条解析文章页。batch 模式不会沿文章页里的 `next_url` 继续跑，它只处理导入列表里的 URL；每一条仍复用当前页面配置里的延迟、Nikki 节点切换、Worker rewrite、缓存策略和错误记录。默认开启 `跳过已抓文章` 时，已经 resolved 的 URL 会跳过。
+
 ## 沿下一篇循环提取
 
 `post_chain_crawler.py` 会从起始页面开始，记录 `post-title mb-2 mb-lg-3` 标题、第二个下载按钮组里的 href、该 href 通过代理跳转后的最终地址，以及 `entry-page-next` 的 href，再进入下一页。它默认最多跑 3 页，避免无限循环：

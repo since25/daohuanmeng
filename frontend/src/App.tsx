@@ -10,7 +10,8 @@ import {
   Search,
   Settings,
   Square,
-  Table2
+  Table2,
+  Upload
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -22,10 +23,12 @@ import {
   ResultRow,
   resolveResult,
   resumeJob,
+  startBatchJob,
   startJob,
   StartJobPayload,
   stopJob
 } from "./api";
+import { BatchImportItem, parseBatchImport } from "./batchImport";
 import {
   clearStartJobPayload,
   defaultPayload,
@@ -61,6 +64,8 @@ function App() {
   const [resultsPage, setResultsPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [resolvingRowId, setResolvingRowId] = useState<number | null>(null);
+  const [batchRaw, setBatchRaw] = useState("");
+  const [batchItems, setBatchItems] = useState<BatchImportItem[]>([]);
   const [message, setMessage] = useState<string | null>(null);
 
   const active = job.status === "running" || job.status === "pausing";
@@ -129,6 +134,37 @@ function App() {
   async function onStart(event: FormEvent) {
     event.preventDefault();
     await runAction(() => startJob(payload));
+  }
+
+  async function onStartBatch() {
+    if (batchItems.length === 0) {
+      setMessage("请先导入批量 URL JSON");
+      return;
+    }
+    await runAction(() => startBatchJob(payload, batchItems));
+  }
+
+  function onParseBatch(raw: string) {
+    setBatchRaw(raw);
+    if (!raw.trim()) {
+      setBatchItems([]);
+      return;
+    }
+    try {
+      const parsed = parseBatchImport(raw);
+      setBatchItems(parsed);
+      setMessage(`已导入 ${parsed.length} 条 URL`);
+    } catch (error) {
+      setBatchItems([]);
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function onBatchFile(file: File | null) {
+    if (!file) {
+      return;
+    }
+    onParseBatch(await file.text());
   }
 
   async function onResolveRow(row: ResultRow) {
@@ -329,6 +365,42 @@ function App() {
             </button>
           </div>
         </form>
+        <section className="batch-import">
+          <h3>批量导入</h3>
+          <label>
+            <span>采集 JSON</span>
+            <textarea
+              placeholder='[{"title":"宫徵羽合集","url":"https://daoyu.fan/45790.html","source_page":1}]'
+              value={batchRaw}
+              onChange={(event) => onParseBatch(event.target.value)}
+            />
+          </label>
+          <label className="file-button">
+            <Upload size={16} /> 选择 JSON
+            <input
+              accept="application/json,.json"
+              type="file"
+              onChange={(event) => onBatchFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <div className="batch-summary">
+            <span>{batchItems.length} 条待解析</span>
+            <button
+              disabled={busy || active || paused || batchItems.length === 0}
+              onClick={onStartBatch}
+              type="button"
+            >
+              <Play size={16} /> 启动批量
+            </button>
+          </div>
+          {batchItems.length > 0 ? (
+            <ol className="batch-preview">
+              {batchItems.slice(0, 3).map((item) => (
+                <li key={item.url}>{item.title || item.url}</li>
+              ))}
+            </ol>
+          ) : null}
+        </section>
       </aside>
 
       <section className="workspace">

@@ -41,6 +41,7 @@ class Repository:
                 """
                 CREATE TABLE IF NOT EXISTS crawl_jobs (
                     id INTEGER PRIMARY KEY,
+                    job_type TEXT NOT NULL DEFAULT 'chain',
                     start_url TEXT NOT NULL,
                     current_url TEXT,
                     max_pages INTEGER NOT NULL,
@@ -81,9 +82,39 @@ class Repository:
                     error TEXT,
                     resolved_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS batch_items (
+                    id INTEGER PRIMARY KEY,
+                    job_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    source_page INTEGER,
+                    title TEXT,
+                    article_url TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    FOREIGN KEY (job_id) REFERENCES crawl_jobs(id),
+                    UNIQUE(job_id, article_url)
+                );
                 """
             )
+            self._ensure_column(connection, "crawl_jobs", "job_type", "TEXT NOT NULL DEFAULT 'chain'")
             self._migrate_post_pages_job_id_not_null(connection)
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _migrate_post_pages_job_id_not_null(self, connection: sqlite3.Connection) -> None:
         columns = {
@@ -206,12 +237,14 @@ class Repository:
         resolve_final_url: bool,
         skip_cached_articles: bool,
         use_resolver_cache: bool,
+        job_type: str = "chain",
     ) -> sqlite3.Row:
         with self._connection() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO crawl_jobs (
                     start_url,
+                    job_type,
                     max_pages,
                     delay_seconds,
                     resolve_final_url,
@@ -224,10 +257,11 @@ class Repository:
                     cache_hit_count,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0, 0, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, 0, 0, 0, ?)
                 """,
                 (
                     start_url,
+                    job_type,
                     max_pages,
                     delay_seconds,
                     int(resolve_final_url),
@@ -237,6 +271,76 @@ class Repository:
                 ),
             )
             return self.get_job(cursor.lastrowid, connection=connection)
+
+    def add_batch_items(self, job_id: int, items: list[dict[str, object]]) -> None:
+        now = _utc_now()
+        with self._connection() as connection:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO batch_items (
+                    job_id,
+                    position,
+                    source_page,
+                    title,
+                    article_url,
+                    status,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                [
+                    (
+                        job_id,
+                        index,
+                        item.get("source_page"),
+                        item.get("title"),
+                        item["url"],
+                        now,
+                    )
+                    for index, item in enumerate(items)
+                ],
+            )
+
+    def get_next_batch_item(self, job_id: int) -> sqlite3.Row | None:
+        with self._connection() as connection:
+            return connection.execute(
+                """
+                SELECT * FROM batch_items
+                WHERE job_id = ? AND status = 'pending'
+                ORDER BY position ASC, id ASC
+                LIMIT 1
+                """,
+                (job_id,),
+            ).fetchone()
+
+    def peek_next_batch_item_after(self, job_id: int, position: int) -> sqlite3.Row | None:
+        with self._connection() as connection:
+            return connection.execute(
+                """
+                SELECT * FROM batch_items
+                WHERE job_id = ? AND status = 'pending' AND position > ?
+                ORDER BY position ASC, id ASC
+                LIMIT 1
+                """,
+                (job_id, position),
+            ).fetchone()
+
+    def update_batch_item(
+        self,
+        item_id: int,
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                """
+                UPDATE batch_items
+                SET status = ?, error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, error, _utc_now(), item_id),
+            )
 
     def get_job(
         self,

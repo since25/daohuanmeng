@@ -70,6 +70,46 @@ class JobRunner:
         )
         return self._serialize_job(running)
 
+    def start_batch(
+        self,
+        options: StartJobOptions,
+        items: list[dict[str, object]],
+    ) -> dict[str, Any]:
+        self.repository.initialize()
+        active_job = self.repository.get_active_job()
+        if active_job is not None:
+            raise RuntimeError("an active job already exists")
+        if not items:
+            raise RuntimeError("batch items are required")
+
+        batch_options = replace(
+            options,
+            start_url="batch://manual-import",
+            max_pages=len(items),
+            skip_cached_articles=True if options.skip_cached_articles else False,
+        )
+        created = self.repository.create_job(
+            start_url=batch_options.start_url,
+            max_pages=batch_options.max_pages,
+            delay_seconds=batch_options.delay_seconds,
+            resolve_final_url=batch_options.resolve_final_url,
+            skip_cached_articles=batch_options.skip_cached_articles,
+            use_resolver_cache=batch_options.use_resolver_cache,
+            job_type="batch",
+        )
+        self.repository.add_batch_items(created["id"], items)
+        self._job_options[created["id"]] = batch_options
+        self._seen_urls[created["id"]] = set()
+        first = self.repository.get_next_batch_item(created["id"])
+        running = self.repository.update_job(
+            created["id"],
+            status="running",
+            current_url=first["article_url"] if first is not None else None,
+            started_at=_utc_now(),
+            error=None,
+        )
+        return self._serialize_job(running)
+
     def pause(self) -> dict[str, Any]:
         job = self._require_active_job()
         if job["status"] == "running":
@@ -119,7 +159,134 @@ class JobRunner:
                     error=None,
                 )
                 continue
+            if job["job_type"] == "batch":
+                self._process_next_batch_item(job)
+                continue
             self._process_current_url(job)
+
+    def _process_next_batch_item(self, job) -> None:
+        job_id = job["id"]
+        options = self._get_job_options(job)
+        item = self.repository.get_next_batch_item(job_id)
+        if item is None:
+            self.repository.update_job(
+                job_id,
+                status="completed",
+                current_url=None,
+                finished_at=_utc_now(),
+            )
+            return
+
+        current_url = item["article_url"]
+        cached_page = self.repository.get_page_by_url(current_url)
+        if (
+            cached_page is not None
+            and options.skip_cached_articles
+            and self._cached_page_is_complete(cached_page, options)
+        ):
+            self.repository.update_batch_item(item["id"], status="skipped")
+            self._finish_batch_step(
+                job,
+                item_position=item["position"],
+                current_url=current_url,
+                error_message=None,
+                processed_delta=1,
+                success_delta=1,
+                error_delta=0,
+                cache_hit_delta=1,
+            )
+            return
+
+        try:
+            article_proxy = self._article_proxy_for_url(job_id, current_url, options)
+            article_request_url = self._article_request_url(current_url, options)
+            logger.info("batch job %s fetching %s", job_id, current_url)
+            html = self._fetch_page_html(article_request_url, options, article_proxy)
+            parsed = parse_article_page(html, current_url)
+            resolved_download_url = None
+            error_message = None
+            status = "fetched"
+            resolved_at = None
+
+            if not parsed["title"] and item["title"]:
+                parsed["title"] = item["title"]
+
+            if options.resolve_final_url and not parsed["download_href"]:
+                error_message = "download href not found"
+                status = "error"
+            elif parsed["download_href"] and options.resolve_final_url:
+                self.repository.upsert_page(
+                    job_id=job_id,
+                    article_url=current_url,
+                    title=parsed["title"],
+                    download_href=parsed["download_href"],
+                    resolved_download_url=None,
+                    next_url=parsed["next_url"],
+                    status="resolving",
+                    error=None,
+                    fetched_at=_utc_now(),
+                    resolved_at=None,
+                )
+                resolved_at = _utc_now()
+                resolved_download_url, error_message = self._resolve_download_url(
+                    parsed["download_href"],
+                    options,
+                    article_proxy,
+                )
+                if error_message:
+                    status = "error"
+                elif resolved_download_url:
+                    status = "resolved"
+
+            self.repository.upsert_page(
+                job_id=job_id,
+                article_url=current_url,
+                title=parsed["title"],
+                download_href=parsed["download_href"],
+                resolved_download_url=resolved_download_url,
+                next_url=parsed["next_url"],
+                status=status,
+                error=error_message,
+                fetched_at=_utc_now(),
+                resolved_at=resolved_at,
+            )
+            self.repository.update_batch_item(
+                item["id"],
+                status="error" if error_message else "done",
+                error=error_message,
+            )
+            self._finish_batch_step(
+                job,
+                item_position=item["position"],
+                current_url=current_url,
+                error_message=error_message,
+                processed_delta=1,
+                success_delta=0 if error_message else 1,
+                error_delta=1 if error_message else 0,
+                cache_hit_delta=0,
+            )
+        except Exception as exc:
+            error_message = str(exc)
+            logger.exception("batch job %s failed fetching %s", job_id, current_url)
+            self.repository.upsert_page(
+                job_id=job_id,
+                article_url=current_url,
+                title=item["title"],
+                status="error",
+                error=error_message,
+                fetched_at=_utc_now(),
+            )
+            self.repository.update_batch_item(item["id"], status="error", error=error_message)
+            self._finish_batch_step(
+                job,
+                item_position=item["position"],
+                current_url=current_url,
+                error_message=error_message,
+                processed_delta=1,
+                success_delta=0,
+                error_delta=1,
+                cache_hit_delta=0,
+            )
 
     def _process_current_url(self, job) -> None:
         job_id = job["id"]
@@ -335,6 +502,66 @@ class JobRunner:
             job_id=job_id,
             options=self._get_job_options(job),
             next_url=safe_next_url,
+        )
+
+    def _finish_batch_step(
+        self,
+        job,
+        *,
+        item_position: int,
+        current_url: str,
+        error_message: str | None,
+        processed_delta: int,
+        success_delta: int,
+        error_delta: int,
+        cache_hit_delta: int,
+    ) -> None:
+        job_id = job["id"]
+        next_item = self.repository.peek_next_batch_item_after(job_id, item_position)
+        next_url = next_item["article_url"] if next_item is not None else None
+        next_processed_count = job["processed_count"] + processed_delta
+
+        if job["status"] == "pausing":
+            self.repository.update_job(
+                job_id,
+                status="paused",
+                current_url=next_url,
+                error=error_message,
+                processed_delta=processed_delta,
+                success_delta=success_delta,
+                error_delta=error_delta,
+                cache_hit_delta=cache_hit_delta,
+            )
+            return
+
+        if next_processed_count >= job["max_pages"] or next_url is None:
+            self.repository.update_job(
+                job_id,
+                status="completed",
+                current_url=None,
+                error=error_message,
+                finished_at=_utc_now(),
+                processed_delta=processed_delta,
+                success_delta=success_delta,
+                error_delta=error_delta,
+                cache_hit_delta=cache_hit_delta,
+            )
+            return
+
+        self.repository.update_job(
+            job_id,
+            status="running",
+            current_url=next_url,
+            error=error_message,
+            processed_delta=processed_delta,
+            success_delta=success_delta,
+            error_delta=error_delta,
+            cache_hit_delta=cache_hit_delta,
+        )
+        self._sleep_between_pages(
+            job_id=job_id,
+            options=self._get_job_options(job),
+            next_url=next_url,
         )
 
     def _resolve_download_url(

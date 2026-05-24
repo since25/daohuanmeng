@@ -112,6 +112,29 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(first.json()["status"], "running")
         self.assertEqual(second.status_code, 409)
 
+    def test_start_batch_imports_manual_urls_and_processes_them(self):
+        response = self.client.post(
+            "/api/job/start-batch",
+            json={
+                **self.start_payload(),
+                "items": [
+                    {"title": "导入标题一", "url": "https://daoyu.fan/3199.html", "source_page": 1},
+                    {"title": "导入标题二", "url": "https://daoyu.fan/3200.html", "source_page": 1},
+                ],
+            },
+        )
+        self.app.state.runner.tick_until_idle_for_tests()
+
+        self.assertEqual(response.status_code, 200)
+        job = self.client.get("/api/job").json()
+        results = self.client.get("/api/results").json()
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["processed_count"], 2)
+        self.assertEqual(
+            [row["article_url"] for row in results],
+            ["https://daoyu.fan/3199.html", "https://daoyu.fan/3200.html"],
+        )
+
     def test_pause_resume_and_stop(self):
         self.client.post("/api/job/start", json=self.start_payload())
 

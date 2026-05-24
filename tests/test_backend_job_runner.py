@@ -648,6 +648,69 @@ class BackendJobRunnerTest(unittest.TestCase):
         self.assertEqual(job["status"], "stopped")
         self.assertEqual(self.fetch_calls, [])
 
+    def test_batch_job_processes_imported_urls_without_following_article_next_url(self):
+        self.html_by_url["https://daoyu.fan/3199.html"] = build_article_html(
+            title="第一页标题",
+            download_href="https://daoyu.fan/goto?down=first",
+            next_url="https://daoyu.fan/should-not-follow.html",
+        )
+        self.html_by_url["https://daoyu.fan/3200.html"] = build_article_html(
+            title="第二页标题",
+            download_href="https://daoyu.fan/goto?down=second",
+        )
+        self.resolved_by_url["https://daoyu.fan/goto?down=first"] = "https://share.example/first"
+        self.resolved_by_url["https://daoyu.fan/goto?down=second"] = "https://share.example/second"
+
+        state = self.runner.start_batch(
+            self.make_options(max_pages=99),
+            [
+                {"title": "导入标题一", "url": "https://daoyu.fan/3199.html", "source_page": 1},
+                {"title": "导入标题二", "url": "https://daoyu.fan/3200.html", "source_page": 1},
+            ],
+        )
+        self.runner.tick_until_idle_for_tests()
+        job = self.repo.get_job(state["id"])
+
+        self.assertEqual(
+            self.fetch_calls,
+            [
+                ("https://daoyu.fan/3199.html", "http://127.0.0.1:28880"),
+                ("https://daoyu.fan/3200.html", "http://127.0.0.1:28880"),
+            ],
+        )
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["processed_count"], 2)
+        self.assertIsNone(self.repo.get_page_by_url("https://daoyu.fan/should-not-follow.html"))
+
+    def test_batch_job_skips_already_resolved_urls_by_default(self):
+        self.seed_existing_page(
+            article_url="https://daoyu.fan/3199.html",
+            next_url=None,
+            download_href="https://daoyu.fan/goto?down=old",
+            resolved_download_url="https://share.example/already",
+            title="Already resolved",
+        )
+        self.html_by_url["https://daoyu.fan/3200.html"] = build_article_html(
+            title="第二页标题",
+            download_href="https://daoyu.fan/goto?down=second",
+        )
+        self.resolved_by_url["https://daoyu.fan/goto?down=second"] = "https://share.example/second"
+
+        state = self.runner.start_batch(
+            self.make_options(max_pages=99, skip_cached_articles=True),
+            [
+                {"title": "已解析", "url": "https://daoyu.fan/3199.html"},
+                {"title": "第二页标题", "url": "https://daoyu.fan/3200.html"},
+            ],
+        )
+        self.runner.tick_until_idle_for_tests()
+        job = self.repo.get_job(state["id"])
+
+        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3200.html", "http://127.0.0.1:28880")])
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["processed_count"], 2)
+        self.assertEqual(job["cache_hit_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

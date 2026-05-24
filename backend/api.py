@@ -40,6 +40,16 @@ class StartJobRequest(BaseModel):
     nikki_delay_timeout_ms: int = Field(default=5000, ge=500)
 
 
+class BatchImportItem(BaseModel):
+    title: str | None = None
+    url: str
+    source_page: int | None = None
+
+
+class StartBatchJobRequest(StartJobRequest):
+    items: list[BatchImportItem] = Field(min_length=1)
+
+
 def create_app(
     db_path: str | Path | None = None,
     *,
@@ -110,6 +120,33 @@ def create_app(
                     nikki_delay_test_url=payload.nikki_delay_test_url,
                     nikki_delay_timeout_ms=payload.nikki_delay_timeout_ms,
                 )
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        run_until_idle_in_background()
+        return state
+
+    @app.post("/api/job/start-batch")
+    def start_batch_job(payload: StartBatchJobRequest) -> dict[str, Any]:
+        try:
+            state = runner.start_batch(
+                StartJobOptions(
+                    start_url=payload.start_url,
+                    max_pages=payload.max_pages,
+                    delay_seconds=payload.delay_seconds,
+                    proxy=payload.proxy,
+                    resolve_final_url=payload.resolve_final_url,
+                    skip_cached_articles=payload.skip_cached_articles,
+                    use_resolver_cache=payload.use_resolver_cache,
+                    resolver_proxy=payload.resolver_proxy,
+                    rewrite_resolver_url=payload.rewrite_resolver_url,
+                    nikki_api_base=payload.nikki_api_base,
+                    nikki_api_secret=payload.nikki_api_secret,
+                    nikki_proxy_group=payload.nikki_proxy_group,
+                    nikki_delay_test_url=payload.nikki_delay_test_url,
+                    nikki_delay_timeout_ms=payload.nikki_delay_timeout_ms,
+                ),
+                [item.model_dump() for item in payload.items],
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

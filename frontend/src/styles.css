@@ -15,7 +15,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -114,7 +115,8 @@ button,
 }
 
 .config-form label,
-.toggle-row {
+.toggle-row,
+.batch-import label {
   color: #dbe7eb;
   display: grid;
   gap: 7px;
@@ -122,13 +124,62 @@ button,
 
 .config-form input,
 .filter-row input,
-.filter-row select {
+.filter-row select,
+.batch-import textarea {
   background: #ffffff;
   border: 1px solid #c8d4da;
   color: #182026;
   min-height: 38px;
   padding: 8px 10px;
   width: 100%;
+}
+
+.batch-import {
+  border-top: 1px solid #2d424c;
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+}
+
+.batch-import h3 {
+  font-size: 16px;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.batch-import textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.file-button {
+  align-items: center;
+  border: 1px solid #45616d;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.file-button input {
+  display: none;
+}
+
+.batch-summary {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.batch-preview {
+  color: #a9bac2;
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
 }
 
 .split {

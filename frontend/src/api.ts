@@ -28,6 +28,12 @@ export interface StartJobPayload {
   nikki_delay_timeout_ms: number;
 }
 
+export interface BatchImportItem {
+  title: string | null;
+  url: string;
+  source_page?: number | null;
+}
+
 export interface JobState {
   id?: number;
   status: JobStatus;
@@ -93,6 +99,16 @@ export async function startJob(payload: StartJobPayload): Promise<JobState> {
   return request<JobState>("/api/job/start", {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export async function startBatchJob(
+  payload: StartJobPayload,
+  items: BatchImportItem[]
+): Promise<JobState> {
+  return request<JobState>("/api/job/start-batch", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, items })
   });
 }
 
