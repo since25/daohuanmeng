@@ -801,6 +801,37 @@ class BackendJobRunnerTest(unittest.TestCase):
         self.assertEqual(job["processed_count"], 2)
         self.assertEqual(job["cache_hit_count"], 1)
 
+    def test_batch_job_does_not_sleep_after_skipping_cached_url(self):
+        self.seed_existing_page(
+            article_url="https://daoyu.fan/3199.html",
+            next_url=None,
+            download_href="https://daoyu.fan/goto?down=old",
+            resolved_download_url="https://share.example/already",
+            title="Already resolved",
+        )
+        self.html_by_url["https://daoyu.fan/3200.html"] = build_article_html(
+            title="第二页标题",
+        )
+
+        state = self.runner.start_batch(
+            self.make_options(
+                max_pages=99,
+                delay_seconds=30,
+                resolve_final_url=False,
+                skip_cached_articles=True,
+            ),
+            [
+                {"title": "已解析", "url": "https://daoyu.fan/3199.html"},
+                {"title": "第二页标题", "url": "https://daoyu.fan/3200.html"},
+            ],
+        )
+        self.runner.tick_until_idle_for_tests()
+        job = self.repo.get_job(state["id"])
+
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["cache_hit_count"], 1)
+        self.assertEqual(self.sleep_calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

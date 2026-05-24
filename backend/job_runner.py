@@ -197,6 +197,7 @@ class JobRunner:
                 success_delta=1,
                 error_delta=0,
                 cache_hit_delta=1,
+                sleep_after_step=False,
             )
             return
 
@@ -518,6 +519,7 @@ class JobRunner:
         success_delta: int,
         error_delta: int,
         cache_hit_delta: int,
+        sleep_after_step: bool = True,
     ) -> None:
         job_id = job["id"]
         next_item = self.repository.peek_next_batch_item_after(job_id, item_position)
@@ -561,11 +563,12 @@ class JobRunner:
             error_delta=error_delta,
             cache_hit_delta=cache_hit_delta,
         )
-        self._sleep_between_pages(
-            job_id=job_id,
-            options=self._get_job_options(job),
-            next_url=next_url,
-        )
+        if sleep_after_step:
+            self._sleep_between_pages(
+                job_id=job_id,
+                options=self._get_job_options(job),
+                next_url=next_url,
+            )
 
     def _resolve_download_url(
         self,
