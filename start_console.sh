@@ -5,12 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 if [ ! -d ".venv" ]; then
+  echo "Creating backend virtual environment..."
   python3 -m venv .venv
 fi
 
-.venv/bin/python -m pip install -r requirements.txt
+echo "Installing backend dependencies..."
+.venv/bin/python -m pip install --no-cache-dir -r requirements.txt
 
 if [ ! -d "frontend/node_modules" ]; then
+  echo "Installing frontend dependencies..."
   (cd frontend && npm install)
 fi
 

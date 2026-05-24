@@ -34,6 +34,9 @@ class MacosMitmScriptsTest(unittest.TestCase):
                 "--listen-port",
                 "rewrite_addon.py",
                 "mitmproxy.plist",
+                "Installing mitmproxy dependencies",
+                "--no-cache-dir",
+                "Waiting for mitmproxy",
             ],
         )
 

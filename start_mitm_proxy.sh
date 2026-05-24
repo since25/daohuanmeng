@@ -16,11 +16,13 @@ cp "${ROOT_DIR}/rewrite_rules.py" "${SERVICE_DIR}/rewrite_rules.py"
 cp "${ROOT_DIR}/requirements.txt" "${SERVICE_DIR}/requirements.txt"
 
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  echo "Creating mitmproxy virtual environment..."
   python3 -m venv "${VENV_DIR}"
 fi
 
-"${VENV_DIR}/bin/python" -m pip install --upgrade pip >/dev/null
-"${VENV_DIR}/bin/python" -m pip install -r "${SERVICE_DIR}/requirements.txt" >/dev/null
+echo "Installing mitmproxy dependencies..."
+"${VENV_DIR}/bin/python" -m pip install --no-cache-dir --upgrade pip >/dev/null
+"${VENV_DIR}/bin/python" -m pip install --no-cache-dir -r "${SERVICE_DIR}/requirements.txt" >/dev/null
 
 cat >"${PLIST_FILE}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -56,10 +58,14 @@ cat >"${PLIST_FILE}" <<PLIST
 </plist>
 PLIST
 
-launchctl bootout "${LAUNCH_DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
+if launchctl bootout "${LAUNCH_DOMAIN}/${LABEL}" >/dev/null 2>&1; then
+  sleep 1
+fi
+echo "Registering LaunchAgent ${LABEL}..."
 launchctl bootstrap "${LAUNCH_DOMAIN}" "${PLIST_FILE}"
 launchctl kickstart -k "${LAUNCH_DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
 
+echo "Waiting for mitmproxy on 127.0.0.1:${PROXY_PORT}..."
 "${VENV_DIR}/bin/python" - "${PROXY_PORT}" <<'PY'
 import socket
 import sys
