@@ -450,7 +450,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 cd frontend
 npm ci
-VITE_API_BASE=/api npm run build
+npm run build
 ```
 
 创建后端 systemd 服务：
@@ -517,7 +517,7 @@ git pull
 .venv/bin/python -m pip install -r requirements.txt
 cd frontend
 npm ci
-VITE_API_BASE=/api npm run build
+npm run build
 sudo systemctl restart daoyufan-api
 sudo nginx -t
 sudo systemctl reload nginx
