@@ -228,6 +228,47 @@ class BackendDbTest(unittest.TestCase):
         self.assertEqual(updated["current_url"], "https://daoyu.fan/3200.html")
         self.assertEqual(updated["error"], "temporary failure")
 
+    def test_get_active_job_returns_latest_non_terminal_job(self):
+        self.repo.initialize()
+
+        first = self.create_job()
+        second = self.create_job()
+
+        self.repo.update_job_status(first["id"], "running")
+        self.repo.update_job_status(second["id"], "completed")
+
+        active = self.repo.get_active_job()
+
+        self.assertEqual(active["id"], first["id"])
+        self.assertEqual(active["status"], "running")
+
+    def test_update_job_increments_counters_and_sets_timestamps(self):
+        self.repo.initialize()
+
+        created = self.create_job()
+        updated = self.repo.update_job(
+            created["id"],
+            status="paused",
+            current_url="https://daoyu.fan/3200.html",
+            error="cached failure",
+            started_at="2026-05-24T00:00:00+00:00",
+            finished_at="2026-05-24T00:01:00+00:00",
+            processed_delta=2,
+            success_delta=1,
+            error_delta=1,
+            cache_hit_delta=3,
+        )
+
+        self.assertEqual(updated["status"], "paused")
+        self.assertEqual(updated["current_url"], "https://daoyu.fan/3200.html")
+        self.assertEqual(updated["error"], "cached failure")
+        self.assertEqual(updated["started_at"], "2026-05-24T00:00:00+00:00")
+        self.assertEqual(updated["finished_at"], "2026-05-24T00:01:00+00:00")
+        self.assertEqual(updated["processed_count"], 2)
+        self.assertEqual(updated["success_count"], 1)
+        self.assertEqual(updated["error_count"], 1)
+        self.assertEqual(updated["cache_hit_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

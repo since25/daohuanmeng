@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Iterator
 
 
+_UNSET = object()
+_ACTIVE_JOB_STATUSES = ("pending", "running", "pausing", "paused")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -249,6 +253,23 @@ class Repository:
         with self._connection() as own_connection:
             return self.get_job(job_id, connection=own_connection)
 
+    def get_active_job(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> sqlite3.Row | None:
+        placeholders = ", ".join("?" for _ in _ACTIVE_JOB_STATUSES)
+        query = (
+            "SELECT * FROM crawl_jobs "
+            f"WHERE status IN ({placeholders}) "
+            "ORDER BY id DESC LIMIT 1"
+        )
+        if connection is not None:
+            return connection.execute(query, _ACTIVE_JOB_STATUSES).fetchone()
+
+        with self._connection() as own_connection:
+            return self.get_active_job(connection=own_connection)
+
     def update_job_status(
         self,
         job_id: int,
@@ -265,6 +286,65 @@ class Repository:
                 WHERE id = ?
                 """,
                 (status, current_url, error, job_id),
+            )
+            return self.get_job(job_id, connection=connection)
+
+    def update_job(
+        self,
+        job_id: int,
+        *,
+        status: str | object = _UNSET,
+        current_url: str | None | object = _UNSET,
+        error: str | None | object = _UNSET,
+        started_at: str | None | object = _UNSET,
+        finished_at: str | None | object = _UNSET,
+        processed_delta: int = 0,
+        success_delta: int = 0,
+        error_delta: int = 0,
+        cache_hit_delta: int = 0,
+    ) -> sqlite3.Row | None:
+        assignments = []
+        parameters = []
+
+        if status is not _UNSET:
+            assignments.append("status = ?")
+            parameters.append(status)
+        if current_url is not _UNSET:
+            assignments.append("current_url = ?")
+            parameters.append(current_url)
+        if error is not _UNSET:
+            assignments.append("error = ?")
+            parameters.append(error)
+        if started_at is not _UNSET:
+            assignments.append("started_at = ?")
+            parameters.append(started_at)
+        if finished_at is not _UNSET:
+            assignments.append("finished_at = ?")
+            parameters.append(finished_at)
+        if processed_delta:
+            assignments.append("processed_count = processed_count + ?")
+            parameters.append(processed_delta)
+        if success_delta:
+            assignments.append("success_count = success_count + ?")
+            parameters.append(success_delta)
+        if error_delta:
+            assignments.append("error_count = error_count + ?")
+            parameters.append(error_delta)
+        if cache_hit_delta:
+            assignments.append("cache_hit_count = cache_hit_count + ?")
+            parameters.append(cache_hit_delta)
+
+        if not assignments:
+            return self.get_job(job_id)
+
+        with self._connection() as connection:
+            connection.execute(
+                f"""
+                UPDATE crawl_jobs
+                SET {", ".join(assignments)}
+                WHERE id = ?
+                """,
+                (*parameters, job_id),
             )
             return self.get_job(job_id, connection=connection)
 
