@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, fields, replace
 from typing import Any
 
 from backend.db import Repository, _utc_now
@@ -57,6 +58,7 @@ class JobRunner:
             resolve_final_url=options.resolve_final_url,
             skip_cached_articles=options.skip_cached_articles,
             use_resolver_cache=options.use_resolver_cache,
+            options_json=self._serialize_options(options),
         )
         self._job_options[created["id"]] = options
         self._seen_urls[created["id"]] = set()
@@ -96,6 +98,7 @@ class JobRunner:
             skip_cached_articles=batch_options.skip_cached_articles,
             use_resolver_cache=batch_options.use_resolver_cache,
             job_type="batch",
+            options_json=self._serialize_options(batch_options),
         )
         self.repository.add_batch_items(created["id"], items)
         self._job_options[created["id"]] = batch_options
@@ -766,7 +769,14 @@ class JobRunner:
     ) -> None:
         if next_url and options.delay_seconds > 0:
             started_at = time.monotonic()
-            self._prepare_next_article_proxy(job_id, next_url, options)
+            try:
+                self._prepare_next_article_proxy(job_id, next_url, options)
+            except Exception as exc:
+                logger.warning(
+                    "preparing proxy for next page %s failed: %s",
+                    next_url,
+                    exc,
+                )
             elapsed = time.monotonic() - started_at
             remaining_delay = max(0.0, options.delay_seconds - elapsed)
             logger.info("sleeping %.2fs before next page %s", options.delay_seconds, next_url)
@@ -784,7 +794,7 @@ class JobRunner:
         if cached is not None:
             return cached
 
-        options = StartJobOptions(
+        options = self._deserialize_options(job) or StartJobOptions(
             start_url=job["start_url"],
             max_pages=job["max_pages"],
             delay_seconds=job["delay_seconds"],
@@ -795,6 +805,31 @@ class JobRunner:
         )
         self._job_options[job["id"]] = options
         return options
+
+    def _serialize_options(self, options: StartJobOptions) -> str:
+        return json.dumps(asdict(options), ensure_ascii=False)
+
+    def _deserialize_options(self, job) -> StartJobOptions | None:
+        try:
+            raw = job["options_json"]
+        except (IndexError, KeyError):
+            return None
+        if not raw:
+            return None
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+
+        allowed_fields = {field.name for field in fields(StartJobOptions)}
+        filtered = {key: value for key, value in parsed.items() if key in allowed_fields}
+        try:
+            return StartJobOptions(**filtered)
+        except TypeError:
+            return None
 
     def _serialize_job(self, row) -> dict[str, Any]:
         state = dict(row)

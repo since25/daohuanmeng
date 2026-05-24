@@ -57,7 +57,8 @@ class Repository:
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     finished_at TEXT,
-                    error TEXT
+                    error TEXT,
+                    options_json TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS post_pages (
@@ -100,6 +101,7 @@ class Repository:
                 """
             )
             self._ensure_column(connection, "crawl_jobs", "job_type", "TEXT NOT NULL DEFAULT 'chain'")
+            self._ensure_column(connection, "crawl_jobs", "options_json", "TEXT")
             self._migrate_post_pages_job_id_not_null(connection)
 
     def _ensure_column(
@@ -238,6 +240,7 @@ class Repository:
         skip_cached_articles: bool,
         use_resolver_cache: bool,
         job_type: str = "chain",
+        options_json: str | None = None,
     ) -> sqlite3.Row:
         with self._connection() as connection:
             cursor = connection.execute(
@@ -255,9 +258,10 @@ class Repository:
                     success_count,
                     error_count,
                     cache_hit_count,
-                    created_at
+                    created_at,
+                    options_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, 0, 0, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, 0, 0, 0, ?, ?)
                 """,
                 (
                     start_url,
@@ -268,6 +272,7 @@ class Repository:
                     int(skip_cached_articles),
                     int(use_resolver_cache),
                     _utc_now(),
+                    options_json,
                 ),
             )
             return self.get_job(cursor.lastrowid, connection=connection)

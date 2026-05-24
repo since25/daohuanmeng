@@ -518,6 +518,96 @@ class BackendJobRunnerTest(unittest.TestCase):
         )
         self.assertEqual(self.rotator_calls, ["node-1", "node-2"])
 
+    def test_runner_continues_when_next_proxy_prepare_fails_inside_delay_window(self):
+        events = []
+        self.html_by_url["https://huanyu-proxy.daoyufan.workers.dev/3199.html"] = build_article_html(
+            title="第一页标题",
+            next_url="https://daoyu.fan/3200.html",
+        )
+        self.html_by_url["https://huanyu-proxy.daoyufan.workers.dev/3200.html"] = build_article_html(
+            title="第二页标题",
+        )
+
+        def flaky_rotate() -> str:
+            call_number = len(self.rotator_calls) + 1
+            self.rotator_calls.append(f"call-{call_number}")
+            if call_number == 2:
+                raise RuntimeError("nikki controller unavailable")
+            events.append(f"rotate:{call_number}")
+            return f"node-{call_number}"
+
+        def fake_fetch(url: str, proxy: str | None = None) -> str:
+            events.append(f"fetch:{url}")
+            return self.fake_fetch_html(url, proxy)
+
+        self.runner = JobRunner(
+            self.repo,
+            fetch_html=fake_fetch,
+            resolve_url=self.fake_resolve_url,
+            sleep=self.fake_sleep,
+            rotate_resolver_proxy=flaky_rotate,
+        )
+
+        state = self.runner.start(
+            self.make_options(
+                max_pages=2,
+                delay_seconds=2.0,
+                resolve_final_url=False,
+                resolver_proxy="http://proxy.example:7890",
+                rewrite_resolver_url=True,
+            )
+        )
+        self.runner.tick_until_idle_for_tests()
+        job = self.repo.get_job(state["id"])
+
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(self.rotator_calls, ["call-1", "call-2", "call-3"])
+        self.assertEqual(
+            events,
+            [
+                "rotate:1",
+                "fetch:https://huanyu-proxy.daoyufan.workers.dev/3199.html",
+                "rotate:3",
+                "fetch:https://huanyu-proxy.daoyufan.workers.dev/3200.html",
+            ],
+        )
+        self.assertEqual(len(self.sleep_calls), 1)
+        self.assertAlmostEqual(self.sleep_calls[0], 2.0, places=3)
+
+    def test_runner_restores_full_options_from_persisted_job(self):
+        self.html_by_url["https://huanyu-proxy.daoyufan.workers.dev/3199.html"] = build_article_html(
+            title="第一页标题",
+        )
+
+        state = self.runner.start(
+            self.make_options(
+                max_pages=1,
+                resolve_final_url=False,
+                resolver_proxy="http://proxy.example:7890",
+                rewrite_resolver_url=True,
+                nikki_api_base="http://nikki.example:9090",
+                nikki_api_secret="secret",
+                nikki_proxy_group="daoyufan-resolver-pool",
+            )
+        )
+        restored_runner = JobRunner(
+            self.repo,
+            fetch_html=self.fake_fetch_html,
+            resolve_url=self.fake_resolve_url,
+            sleep=self.fake_sleep,
+            rotate_resolver_proxy=lambda: self.rotator_calls.append("rotate") or "node-a",
+        )
+
+        restored_runner.tick_until_idle_for_tests()
+        job = self.repo.get_job(state["id"])
+
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(self.rotator_calls, ["rotate"])
+        self.assertEqual(
+            self.fetch_calls,
+            [("https://huanyu-proxy.daoyufan.workers.dev/3199.html", "http://proxy.example:7890")],
+        )
+
     def test_runner_skips_cached_article_urls_and_continues_from_saved_next_url(self):
         self.seed_existing_page(
             article_url="https://daoyu.fan/3199.html",

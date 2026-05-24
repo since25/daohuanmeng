@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import os
 import tempfile
 import threading
@@ -14,13 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend.db import Repository
+from backend.db import Repository, _utc_now
 from backend.job_runner import JobRunner
 from backend.models import StartJobOptions
 
 
 FetchHtmlCallable = Callable[[str, str | None], str]
 ResolveUrlCallable = Callable[[str, str | None], str]
+logger = logging.getLogger(__name__)
 
 
 class StartJobRequest(BaseModel):
@@ -84,7 +86,18 @@ def create_app(
 
         def worker() -> None:
             with worker_lock:
-                runner.tick_until_idle_for_tests()
+                try:
+                    runner.tick_until_idle_for_tests()
+                except Exception as exc:
+                    logger.exception("background job worker crashed")
+                    active_job = repository.get_active_job()
+                    if active_job is not None:
+                        repository.update_job(
+                            active_job["id"],
+                            status="failed",
+                            error=str(exc),
+                            finished_at=_utc_now(),
+                        )
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
