@@ -65,6 +65,21 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ok": True})
 
+    def test_cors_allows_local_frontend_ports(self):
+        response = self.client.options(
+            "/api/health",
+            headers={
+                "Origin": "http://127.0.0.1:5175",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "http://127.0.0.1:5175",
+        )
+
     def test_start_rejects_second_active_job(self):
         first = self.client.post("/api/job/start", json=self.start_payload())
         second = self.client.post("/api/job/start", json=self.start_payload())
