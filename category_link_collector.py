@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 
 class _CategoryLinkParser(HTMLParser):
@@ -83,7 +83,8 @@ def fetch_html(url: str, *, timeout: float = 20) -> str:
             )
         },
     )
-    with urlopen(request, timeout=timeout) as response:
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as response:
         return response.read().decode("utf-8", errors="replace")
 
 

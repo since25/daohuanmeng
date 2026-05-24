@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import MagicMock, patch
 
+import category_link_collector as collector
 from category_link_collector import extract_category_links, parse_page_range
 
 
@@ -42,6 +44,37 @@ class CategoryLinkCollectorTest(unittest.TestCase):
                 },
             ],
         )
+
+    def test_fetch_html_uses_direct_opener_without_environment_proxy(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"<html>ok</html>"
+        opener = MagicMock()
+        opener.open.return_value = response
+
+        with (
+            patch.object(
+                collector,
+                "urlopen",
+                create=True,
+                side_effect=AssertionError("default urlopen should not be used"),
+            ),
+            patch.object(collector, "ProxyHandler", create=True) as proxy_handler,
+            patch.object(
+                collector,
+                "build_opener",
+                create=True,
+                return_value=opener,
+            ) as build_opener,
+        ):
+            proxy_handler.return_value = "direct-proxy-handler"
+
+            html = collector.fetch_html("https://daoyu.fan/category/dou-yin-fan-cha/page/1")
+
+        self.assertEqual(html, "<html>ok</html>")
+        proxy_handler.assert_called_once_with({})
+        build_opener.assert_called_once_with("direct-proxy-handler")
+        opener.open.assert_called_once()
 
 
 if __name__ == "__main__":
