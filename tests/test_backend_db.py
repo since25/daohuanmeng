@@ -102,6 +102,77 @@ class BackendDbTest(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_initialize_migrates_legacy_nullable_post_pages_job_id(self):
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE crawl_jobs (
+                    id INTEGER PRIMARY KEY,
+                    start_url TEXT NOT NULL,
+                    current_url TEXT,
+                    max_pages INTEGER NOT NULL,
+                    delay_seconds REAL NOT NULL,
+                    resolve_final_url INTEGER NOT NULL,
+                    skip_cached_articles INTEGER NOT NULL,
+                    use_resolver_cache INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    processed_count INTEGER NOT NULL,
+                    success_count INTEGER NOT NULL,
+                    error_count INTEGER NOT NULL,
+                    cache_hit_count INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    error TEXT
+                );
+
+                CREATE TABLE post_pages (
+                    id INTEGER PRIMARY KEY,
+                    job_id INTEGER,
+                    article_url TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    download_href TEXT,
+                    resolved_download_url TEXT,
+                    next_url TEXT,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    fetched_at TEXT,
+                    resolved_at TEXT
+                );
+
+                INSERT INTO post_pages (article_url, title, status)
+                VALUES ('https://daoyu.fan/legacy.html', 'Legacy title', 'fetched');
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.repo.initialize()
+
+        migrated = self.repo.get_page_by_url("https://daoyu.fan/legacy.html")
+        self.assertIsNotNone(migrated["job_id"])
+        self.assertEqual(migrated["title"], "Legacy title")
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            columns = {
+                row[1]: row
+                for row in connection.execute("PRAGMA table_info(post_pages)").fetchall()
+            }
+            self.assertEqual(columns["job_id"][3], 1)
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO post_pages (article_url, status)
+                    VALUES (?, ?)
+                    """,
+                    ("https://daoyu.fan/null-after-migration.html", "fetched"),
+                )
+        finally:
+            connection.close()
+
     def test_resolver_cache_reuses_download_href_and_preserves_first_resolved_url(self):
         self.repo.initialize()
 

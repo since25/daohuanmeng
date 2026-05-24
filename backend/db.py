@@ -79,6 +79,119 @@ class Repository:
                 );
                 """
             )
+            self._migrate_post_pages_job_id_not_null(connection)
+
+    def _migrate_post_pages_job_id_not_null(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(post_pages)").fetchall()
+        }
+        job_id_column = columns.get("job_id")
+        if job_id_column is None or job_id_column["notnull"]:
+            return
+
+        migration_job_id = self._create_legacy_import_job(connection)
+        connection.execute("ALTER TABLE post_pages RENAME TO post_pages_legacy")
+        connection.executescript(
+            """
+            CREATE TABLE post_pages (
+                id INTEGER PRIMARY KEY,
+                job_id INTEGER NOT NULL,
+                article_url TEXT NOT NULL UNIQUE,
+                title TEXT,
+                download_href TEXT,
+                resolved_download_url TEXT,
+                next_url TEXT,
+                status TEXT NOT NULL,
+                error TEXT,
+                fetched_at TEXT,
+                resolved_at TEXT,
+                FOREIGN KEY (job_id) REFERENCES crawl_jobs(id)
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO post_pages (
+                id,
+                job_id,
+                article_url,
+                title,
+                download_href,
+                resolved_download_url,
+                next_url,
+                status,
+                error,
+                fetched_at,
+                resolved_at
+            )
+            SELECT
+                id,
+                CASE
+                    WHEN job_id IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM crawl_jobs WHERE crawl_jobs.id = post_pages_legacy.job_id
+                        )
+                    THEN job_id
+                    ELSE ?
+                END,
+                article_url,
+                title,
+                download_href,
+                resolved_download_url,
+                next_url,
+                status,
+                error,
+                fetched_at,
+                resolved_at
+            FROM post_pages_legacy
+            """,
+            (migration_job_id,),
+        )
+        connection.execute("DROP TABLE post_pages_legacy")
+
+    def _create_legacy_import_job(self, connection: sqlite3.Connection) -> int:
+        now = _utc_now()
+        cursor = connection.execute(
+            """
+            INSERT INTO crawl_jobs (
+                start_url,
+                max_pages,
+                delay_seconds,
+                resolve_final_url,
+                skip_cached_articles,
+                use_resolver_cache,
+                status,
+                processed_count,
+                success_count,
+                error_count,
+                cache_hit_count,
+                created_at,
+                started_at,
+                finished_at,
+                error
+            )
+            VALUES (
+                'legacy://post-pages-migration',
+                0,
+                0,
+                0,
+                1,
+                1,
+                'migrated',
+                0,
+                0,
+                0,
+                0,
+                ?,
+                ?,
+                ?,
+                NULL
+            )
+            """,
+            (now, now, now),
+        )
+        return cursor.lastrowid
 
     def create_job(
         self,
