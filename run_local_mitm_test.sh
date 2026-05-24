@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${ROOT_DIR}/.venv"
 LOG_DIR="${ROOT_DIR}/logs"
-PROXY_PORT="${PROXY_PORT:-8080}"
+PROXY_PORT="${PROXY_PORT:-28880}"
 
 mkdir -p "${LOG_DIR}"
 

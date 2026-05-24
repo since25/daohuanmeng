@@ -4,7 +4,7 @@ export const defaultPayload: StartJobPayload = {
   start_url: "https://daoyu.fan/3199.html",
   max_pages: 2,
   delay_seconds: 2,
-  proxy: "http://127.0.0.1:8080",
+  proxy: "http://127.0.0.1:28880",
   resolve_final_url: true,
   skip_cached_articles: true,
   use_resolver_cache: true,

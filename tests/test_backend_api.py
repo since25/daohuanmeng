@@ -54,7 +54,7 @@ class BackendApiTest(unittest.TestCase):
             "start_url": "https://daoyu.fan/3199.html",
             "max_pages": 1,
             "delay_seconds": 0,
-            "proxy": "http://127.0.0.1:8080",
+            "proxy": "http://127.0.0.1:28880",
             "resolve_final_url": True,
             "skip_cached_articles": False,
             "use_resolver_cache": True,
@@ -182,7 +182,7 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(self.fetch_calls, [])
         self.assertEqual(
             self.resolve_calls,
-            [("https://daoyu.fan/goto?down=download", "http://127.0.0.1:8080")],
+            [("https://daoyu.fan/goto?down=download", "http://127.0.0.1:28880")],
         )
 
     def test_resolve_single_result_bypasses_existing_resolver_cache(self):
@@ -220,7 +220,7 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(response.json()["resolved_download_url"], "https://share.feijipan.com/s/QOPtO6IO?code=6666")
         self.assertEqual(
             self.resolve_calls,
-            [("https://daoyu.fan/goto?down=download", "http://127.0.0.1:8080")],
+            [("https://daoyu.fan/goto?down=download", "http://127.0.0.1:28880")],
         )
 
 

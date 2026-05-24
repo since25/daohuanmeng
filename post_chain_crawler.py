@@ -69,7 +69,7 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--start", default="https://daoyu.fan/3199.html")
     parser.add_argument("--max-pages", type=int, default=3)
-    parser.add_argument("--proxy", default="http://127.0.0.1:8080")
+    parser.add_argument("--proxy", default="http://127.0.0.1:28880")
     parser.add_argument("--delay", type=float, default=0.5)
     args = parser.parse_args(argv)
 

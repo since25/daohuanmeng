@@ -120,7 +120,7 @@ class PostChainCrawlerTest(unittest.TestCase):
         response.headers.get_content_charset.return_value = "utf-8"
         response.read.return_value = b"<html></html>"
 
-        html = fetch_html_via_proxy("https://daoyu.fan/3199.html", "http://127.0.0.1:8080")
+        html = fetch_html_via_proxy("https://daoyu.fan/3199.html", "http://127.0.0.1:28880")
 
         self.assertEqual(html, "<html></html>")
         _, kwargs = build_opener.return_value.open.call_args
@@ -139,7 +139,7 @@ class PostChainCrawlerTest(unittest.TestCase):
 
         final_url = resolve_url_via_proxy(
             "https://daoyu.fan/goto?down=bbb",
-            "http://127.0.0.1:8080",
+            "http://127.0.0.1:28880",
         )
 
         self.assertEqual(final_url, "https://share.feijipan.com/s/QOPtO6IO?code=6666")
@@ -155,7 +155,7 @@ class PostChainCrawlerTest(unittest.TestCase):
 
         final_url = resolve_url_via_proxy(
             "https://daoyu.fan/goto?down=bbb",
-            "http://127.0.0.1:8080",
+            "http://127.0.0.1:28880",
         )
 
         self.assertEqual(final_url, "https://example.com/final")

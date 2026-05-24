@@ -81,7 +81,7 @@ class BackendJobRunnerTest(unittest.TestCase):
         start_url: str = "https://daoyu.fan/3199.html",
         max_pages: int = 10,
         delay_seconds: float = 0.0,
-        proxy: str | None = "http://127.0.0.1:8080",
+        proxy: str | None = "http://127.0.0.1:28880",
         resolve_final_url: bool = True,
         skip_cached_articles: bool = False,
         use_resolver_cache: bool = True,
@@ -225,7 +225,7 @@ class BackendJobRunnerTest(unittest.TestCase):
         page = self.repo.get_page_by_url("https://daoyu.fan/3199.html")
         job = self.repo.get_job(state["id"])
 
-        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3199.html", "http://127.0.0.1:8080")])
+        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3199.html", "http://127.0.0.1:28880")])
         self.assertEqual(page["title"], "Refetched page")
         self.assertEqual(page["status"], "resolved")
         self.assertEqual(job["cache_hit_count"], 0)
@@ -539,7 +539,7 @@ class BackendJobRunnerTest(unittest.TestCase):
         job = self.repo.get_job(state["id"])
         page = self.repo.get_page_by_url("https://daoyu.fan/3200.html")
 
-        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3200.html", "http://127.0.0.1:8080")])
+        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3200.html", "http://127.0.0.1:28880")])
         self.assertEqual(job["cache_hit_count"], 1)
         self.assertEqual(job["processed_count"], 2)
         self.assertEqual(page["title"], "第二页标题")
@@ -603,7 +603,7 @@ class BackendJobRunnerTest(unittest.TestCase):
         self.assertEqual(pausing["status"], "pausing")
         self.assertEqual(paused["status"], "paused")
         self.assertEqual(paused["current_url"], "https://daoyu.fan/3200.html")
-        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3199.html", "http://127.0.0.1:8080")])
+        self.assertEqual(self.fetch_calls, [("https://daoyu.fan/3199.html", "http://127.0.0.1:28880")])
 
     def test_resume_continues_from_current_url(self):
         self.html_by_url["https://daoyu.fan/3199.html"] = build_article_html(
@@ -627,8 +627,8 @@ class BackendJobRunnerTest(unittest.TestCase):
         self.assertEqual(
             self.fetch_calls,
             [
-                ("https://daoyu.fan/3199.html", "http://127.0.0.1:8080"),
-                ("https://daoyu.fan/3200.html", "http://127.0.0.1:8080"),
+                ("https://daoyu.fan/3199.html", "http://127.0.0.1:28880"),
+                ("https://daoyu.fan/3200.html", "http://127.0.0.1:28880"),
             ],
         )
         self.assertEqual(job["status"], "completed")

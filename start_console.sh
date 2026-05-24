@@ -29,7 +29,7 @@ find_free_port() {
 
 BACKEND_PORT="${BACKEND_PORT:-8765}"
 FRONTEND_PORT="${FRONTEND_PORT:-$(find_free_port 5173)}"
-PROXY_PORT="${PROXY_PORT:-8080}"
+PROXY_PORT="${PROXY_PORT:-28880}"
 START_PROXY="${START_PROXY:-1}"
 MITM_LOG_DIR="${HOME}/Library/Application Support/daoyufan-mitm/logs"
 PROXY_STARTED=0

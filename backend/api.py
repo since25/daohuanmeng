@@ -27,7 +27,7 @@ class StartJobRequest(BaseModel):
     start_url: str
     max_pages: int = Field(default=25, ge=1)
     delay_seconds: float = Field(default=2, ge=0)
-    proxy: str | None = "http://127.0.0.1:8080"
+    proxy: str | None = "http://127.0.0.1:28880"
     resolve_final_url: bool = True
     skip_cached_articles: bool = True
     use_resolver_cache: bool = True
