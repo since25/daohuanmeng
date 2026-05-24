@@ -253,6 +253,19 @@ class Repository:
         with self._connection() as own_connection:
             return self.get_job(job_id, connection=own_connection)
 
+    def get_latest_job(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> sqlite3.Row | None:
+        if connection is not None:
+            return connection.execute(
+                "SELECT * FROM crawl_jobs ORDER BY id DESC LIMIT 1",
+            ).fetchone()
+
+        with self._connection() as own_connection:
+            return self.get_latest_job(connection=own_connection)
+
     def get_active_job(
         self,
         *,
@@ -411,6 +424,24 @@ class Repository:
 
         with self._connection() as own_connection:
             return self.get_page_by_url(article_url, connection=own_connection)
+
+    def list_pages(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[sqlite3.Row]:
+        if connection is not None:
+            return list(
+                connection.execute(
+                    """
+                    SELECT * FROM post_pages
+                    ORDER BY id ASC
+                    """
+                ).fetchall()
+            )
+
+        with self._connection() as own_connection:
+            return self.list_pages(connection=own_connection)
 
     def save_resolver_cache(
         self,
