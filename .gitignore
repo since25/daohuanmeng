@@ -4,6 +4,7 @@ logs/
 .run/
 .chrome-mitm-profile/
 .superpowers/
+.worktrees/
 __pycache__/
 tests/__pycache__/
 .pytest_cache/
