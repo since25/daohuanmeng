@@ -19,6 +19,13 @@ export interface StartJobPayload {
   resolve_final_url: boolean;
   skip_cached_articles: boolean;
   use_resolver_cache: boolean;
+  resolver_proxy: string | null;
+  rewrite_resolver_url: boolean;
+  nikki_api_base: string | null;
+  nikki_api_secret: string | null;
+  nikki_proxy_group: string | null;
+  nikki_delay_test_url: string;
+  nikki_delay_timeout_ms: number;
 }
 
 export interface JobState {
@@ -99,6 +106,16 @@ export async function resumeJob(): Promise<JobState> {
 
 export async function stopJob(): Promise<JobState> {
   return request<JobState>("/api/job/stop", { method: "POST" });
+}
+
+export async function resolveResult(
+  id: number,
+  payload: StartJobPayload
+): Promise<ResultRow> {
+  return request<ResultRow>(`/api/results/${id}/resolve`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function getJob(): Promise<JobState> {

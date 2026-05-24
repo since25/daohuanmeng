@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from backend.db import Repository, _utc_now
 from backend.http_client import HttpClient
 from backend.models import StartJobOptions
+from backend.nikki import NikkiProxyRotator
 from backend.parser import parse_article_page
+from rewrite_rules import rewrite_url
 
 
 FetchHtmlCallable = Callable[[str, str | None], str]
 ResolveUrlCallable = Callable[[str, str | None], str]
+SleepCallable = Callable[[float], None]
+RotateResolverProxyCallable = Callable[[], str]
+
+logger = logging.getLogger(__name__)
 
 
 class JobRunner:
@@ -20,12 +29,20 @@ class JobRunner:
         *,
         fetch_html: FetchHtmlCallable | None = None,
         resolve_url: ResolveUrlCallable | None = None,
+        sleep: SleepCallable | None = None,
+        rotate_resolver_proxy: RotateResolverProxyCallable | None = None,
+        retry_attempts: int = 3,
     ):
         self.repository = repository
         self._fetch_html = fetch_html
         self._resolve_url = resolve_url
+        self._sleep = sleep or time.sleep
+        self._rotate_resolver_proxy = rotate_resolver_proxy
+        self._retry_attempts = retry_attempts
         self._job_options: dict[int, StartJobOptions] = {}
+        self._nikki_rotators: dict[tuple[str, str, str], NikkiProxyRotator] = {}
         self._seen_urls: dict[int, set[str]] = {}
+        self._prepared_article_proxies: dict[int, dict[str, str | None]] = {}
 
     def start(self, options: StartJobOptions) -> dict[str, Any]:
         self.repository.initialize()
@@ -43,6 +60,7 @@ class JobRunner:
         )
         self._job_options[created["id"]] = options
         self._seen_urls[created["id"]] = set()
+        logger.info("job %s starting at %s", created["id"], options.start_url)
         running = self.repository.update_job(
             created["id"],
             status="running",
@@ -130,7 +148,11 @@ class JobRunner:
             return
 
         cached_page = self.repository.get_page_by_url(current_url)
-        if cached_page is not None and options.skip_cached_articles:
+        if (
+            cached_page is not None
+            and options.skip_cached_articles
+            and self._cached_page_is_complete(cached_page, options)
+        ):
             cached_error = cached_page["error"]
             next_url = cached_page["next_url"]
             self._finish_step(
@@ -146,18 +168,46 @@ class JobRunner:
             return
 
         try:
-            html = self._fetch_page_html(current_url, options.proxy)
+            article_proxy = self._article_proxy_for_url(job_id, current_url, options)
+            article_request_url = self._article_request_url(current_url, options)
+            if article_request_url != current_url:
+                logger.info(
+                    "job %s fetching %s via worker %s",
+                    job_id,
+                    current_url,
+                    article_request_url,
+                )
+            else:
+                logger.info("job %s fetching %s", job_id, current_url)
+            html = self._fetch_page_html(article_request_url, options, article_proxy)
             parsed = parse_article_page(html, current_url)
             resolved_download_url = None
             error_message = None
             status = "fetched"
             resolved_at = None
 
-            if parsed["download_href"] and options.resolve_final_url:
+            if options.resolve_final_url and not parsed["download_href"]:
+                error_message = "download href not found"
+                status = "error"
+            elif parsed["download_href"] and options.resolve_final_url:
+                self.repository.upsert_page(
+                    job_id=job_id,
+                    article_url=current_url,
+                    title=parsed["title"],
+                    download_href=parsed["download_href"],
+                    resolved_download_url=None,
+                    next_url=parsed["next_url"],
+                    status="resolving",
+                    error=None,
+                    fetched_at=_utc_now(),
+                    resolved_at=None,
+                )
+                logger.info("job %s resolving %s", job_id, parsed["download_href"])
                 resolved_at = _utc_now()
                 resolved_download_url, error_message = self._resolve_download_url(
                     parsed["download_href"],
                     options,
+                    article_proxy,
                 )
                 if error_message:
                     status = "error"
@@ -176,6 +226,7 @@ class JobRunner:
                 fetched_at=_utc_now(),
                 resolved_at=resolved_at,
             )
+            logger.info("job %s saved %s as %s", job_id, current_url, status)
             self._finish_step(
                 job,
                 current_url=current_url,
@@ -188,6 +239,7 @@ class JobRunner:
             )
         except Exception as exc:
             error_message = str(exc)
+            logger.exception("job %s failed fetching %s", job_id, current_url)
             self.repository.upsert_page(
                 job_id=job_id,
                 article_url=current_url,
@@ -279,36 +331,220 @@ class JobRunner:
             error_delta=error_delta,
             cache_hit_delta=cache_hit_delta,
         )
+        self._sleep_between_pages(
+            job_id=job_id,
+            options=self._get_job_options(job),
+            next_url=safe_next_url,
+        )
 
     def _resolve_download_url(
         self,
         download_href: str,
         options: StartJobOptions,
+        proxy: str | None,
     ) -> tuple[str | None, str | None]:
         if options.use_resolver_cache:
             cached = self.repository.get_resolver_cache(download_href)
-            if cached is not None:
+            if cached is not None and cached["resolved_download_url"]:
                 return cached["resolved_download_url"], cached["error"]
 
-        try:
-            resolved_download_url = self._resolve_final_url(download_href, options.proxy)
-        except Exception as exc:
-            error_message = str(exc)
-            self.repository.save_resolver_cache(download_href, None, error_message)
-            return None, error_message
+        resolver_url = self._resolver_request_url(download_href, options)
+        current_proxy = proxy
+        last_error: Exception | None = None
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                resolved_download_url = self._resolve_final_url(resolver_url, current_proxy)
+                self.repository.save_resolver_cache(download_href, resolved_download_url, None)
+                return resolved_download_url, None
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self._retry_attempts:
+                    break
+                logger.warning(
+                    "resolve attempt %s/%s failed for %s: %s",
+                    attempt,
+                    self._retry_attempts,
+                    resolver_url,
+                    exc,
+                )
+                if options.resolver_proxy:
+                    current_proxy = self._prepare_article_proxy(options)
+                elif options.delay_seconds > 0:
+                    self._sleep(options.delay_seconds)
 
-        self.repository.save_resolver_cache(download_href, resolved_download_url, None)
-        return resolved_download_url, None
+        error_message = str(last_error or RuntimeError("resolve failed"))
+        logger.warning("resolver failed for %s: %s", download_href, error_message)
+        return None, error_message
 
-    def _fetch_page_html(self, url: str, proxy: str | None) -> str:
-        if self._fetch_html is not None:
-            return self._fetch_html(url, proxy)
-        return HttpClient(proxy).fetch_html(url)
+    def resolve_page(self, page_id: int, options: StartJobOptions):
+        page = self.repository.get_page_by_id(page_id)
+        if page is None:
+            raise RuntimeError("page not found")
+        if not page["download_href"]:
+            raise RuntimeError("download href not found")
+
+        article_proxy = self._prepare_article_proxy(options)
+        self.repository.upsert_page(
+            job_id=page["job_id"],
+            article_url=page["article_url"],
+            title=page["title"],
+            download_href=page["download_href"],
+            resolved_download_url=None,
+            next_url=page["next_url"],
+            status="resolving",
+            error=None,
+            fetched_at=page["fetched_at"],
+            resolved_at=None,
+        )
+        resolved_at = _utc_now()
+        no_cache_options = replace(options, use_resolver_cache=False)
+        resolved_download_url, error_message = self._resolve_download_url(
+            page["download_href"],
+            no_cache_options,
+            article_proxy,
+        )
+        return self.repository.upsert_page(
+            job_id=page["job_id"],
+            article_url=page["article_url"],
+            title=page["title"],
+            download_href=page["download_href"],
+            resolved_download_url=resolved_download_url,
+            next_url=page["next_url"],
+            status="error" if error_message else "resolved",
+            error=error_message,
+            fetched_at=page["fetched_at"],
+            resolved_at=resolved_at,
+        )
+
+    def _fetch_page_html(self, url: str, options: StartJobOptions, proxy: str | None) -> str:
+        return self._with_retries(
+            "fetch",
+            url,
+            options,
+            lambda: self._fetch_html(url, proxy)
+            if self._fetch_html is not None
+            else HttpClient(proxy).fetch_html(url),
+        )
 
     def _resolve_final_url(self, url: str, proxy: str | None) -> str:
         if self._resolve_url is not None:
             return self._resolve_url(url, proxy)
         return HttpClient(proxy).resolve_final_url(url)
+
+    def _resolver_request_url(self, download_href: str, options: StartJobOptions) -> str:
+        if not options.rewrite_resolver_url:
+            return download_href
+        return rewrite_url(download_href) or download_href
+
+    def _article_request_url(self, article_url: str, options: StartJobOptions) -> str:
+        if not options.rewrite_resolver_url:
+            return article_url
+        return rewrite_url(article_url) or article_url
+
+    def _article_proxy_for_url(
+        self,
+        job_id: int,
+        article_url: str,
+        options: StartJobOptions,
+    ) -> str | None:
+        prepared = self._prepared_article_proxies.setdefault(job_id, {})
+        if article_url in prepared:
+            return prepared.pop(article_url)
+        return self._prepare_article_proxy(options)
+
+    def _prepare_next_article_proxy(
+        self,
+        job_id: int,
+        article_url: str,
+        options: StartJobOptions,
+    ) -> None:
+        prepared = self._prepared_article_proxies.setdefault(job_id, {})
+        if article_url not in prepared:
+            prepared[article_url] = self._prepare_article_proxy(options)
+
+    def _prepare_article_proxy(self, options: StartJobOptions) -> str | None:
+        selected_node = self._prepare_resolver_proxy(options)
+        if selected_node:
+            logger.info("selected article proxy node: %s", selected_node)
+        return options.resolver_proxy or options.proxy
+
+    def _prepare_resolver_proxy(self, options: StartJobOptions) -> str | None:
+        if not options.resolver_proxy:
+            return None
+        if self._rotate_resolver_proxy is not None:
+            return self._rotate_resolver_proxy()
+        if not (
+            options.nikki_api_base
+            and options.nikki_proxy_group
+        ):
+            return None
+
+        key = (
+            options.nikki_api_base,
+            options.nikki_api_secret or "",
+            options.nikki_proxy_group,
+        )
+        rotator = self._nikki_rotators.get(key)
+        if rotator is None:
+            rotator = NikkiProxyRotator(
+                api_base=options.nikki_api_base,
+                api_secret=options.nikki_api_secret,
+                proxy_group=options.nikki_proxy_group,
+                delay_test_url=options.nikki_delay_test_url,
+                delay_timeout_ms=options.nikki_delay_timeout_ms,
+            )
+            self._nikki_rotators[key] = rotator
+        return rotator.prepare_next_node()
+
+    def _cached_page_is_complete(self, cached_page, options: StartJobOptions) -> bool:
+        if cached_page["status"] == "error" or cached_page["error"]:
+            return False
+        if not options.resolve_final_url:
+            return True
+        return bool(cached_page["resolved_download_url"])
+
+    def _with_retries(
+        self,
+        action: str,
+        url: str,
+        options: StartJobOptions,
+        operation: Callable[[], str],
+    ) -> str:
+        last_error: Exception | None = None
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                return operation()
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self._retry_attempts:
+                    break
+                logger.warning(
+                    "%s attempt %s/%s failed for %s: %s",
+                    action,
+                    attempt,
+                    self._retry_attempts,
+                    url,
+                    exc,
+                )
+                if options.delay_seconds > 0:
+                    self._sleep(options.delay_seconds)
+        raise last_error or RuntimeError(f"{action} failed")
+
+    def _sleep_between_pages(
+        self,
+        *,
+        job_id: int,
+        options: StartJobOptions,
+        next_url: str | None,
+    ) -> None:
+        if next_url and options.delay_seconds > 0:
+            started_at = time.monotonic()
+            self._prepare_next_article_proxy(job_id, next_url, options)
+            elapsed = time.monotonic() - started_at
+            remaining_delay = max(0.0, options.delay_seconds - elapsed)
+            logger.info("sleeping %.2fs before next page %s", options.delay_seconds, next_url)
+            if remaining_delay > 0:
+                self._sleep(remaining_delay)
 
     def _require_active_job(self):
         job = self.repository.get_active_job()

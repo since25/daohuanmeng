@@ -237,13 +237,7 @@ https://daoyu.fan/4687.html
 http://127.0.0.1:8080
 ```
 
-启动代理：
-
-```bash
-./start_mitm_proxy.sh
-```
-
-启动后端和前端控制台：
+一键启动代理、后端和前端控制台：
 
 ```bash
 ./start_console.sh
@@ -273,6 +267,38 @@ https://daoyu.fan/3199.html
 http://127.0.0.1:8765
 ```
 
+`start_console.sh` 默认会启动本地 MITM 代理 `http://127.0.0.1:8080`，并在按 `Ctrl-C` 退出时一起关闭代理、后端和前端。如果只想启动控制台、不管理代理：
+
+```bash
+START_PROXY=0 ./start_console.sh
+```
+
+如果需要每篇文章全流程切换 Nikki 节点，在左侧表单里开启：
+
+- `解析最终网盘链接`
+- `下载跳转改写到 Worker`
+
+并填写：
+
+```text
+文章处理代理: http://<proxy-gateway-host>:7890
+Nikki API: http://<nikki-api-host>:9090
+Nikki 密钥: <external-controller secret>
+策略组: daoyufan-resolver-pool
+```
+
+左侧表单里的 `文章处理代理` 是整篇文章处理流程使用的 HTTP 代理；填了它以后，每篇文章开始处理前会先通过 `Nikki API` 和 `Nikki 密钥` 调用 Nikki/Mihomo external-controller，嗅探并切换 `daoyufan-resolver-pool` 节点，然后抓文章页和解析下载跳转都走这个节点。填好后点 `保存配置`，配置会保存在当前浏览器的 localStorage 里，刷新页面或重启 `start_console.sh` 后仍会自动带回；如果换浏览器或清理站点数据，则需要重新填写。
+
+运行时流程：
+
+```text
+每篇文章开始 -> 调 Nikki /delay 嗅探可用节点
+每篇文章开始 -> PUT /proxies/daoyufan-resolver-pool 切换节点
+抓文章页 -> 通过 <proxy-gateway-host>:7890 访问 daoyu.fan
+解析下载 href -> 可选 rewrite 到 huanyu-proxy.daoyufan.workers.dev
+解析请求 -> 通过同一个 <proxy-gateway-host>:7890 访问下载跳转或 rewrite 地址
+```
+
 常用接口：
 
 ```text
@@ -287,7 +313,7 @@ GET  /api/export/json
 GET  /api/export/csv
 ```
 
-停止控制台时，在运行 `./start_console.sh` 的终端按 `Ctrl-C`。停止代理：
+停止控制台时，在运行 `./start_console.sh` 的终端按 `Ctrl-C`，脚本会关闭本次启动的所有服务。若你是单独启动代理，仍可手动停止：
 
 ```bash
 ./stop_mitm_proxy.sh
@@ -399,3 +425,102 @@ curl -skL --proxy http://127.0.0.1:8080 "https://daoyu.fan/57517.html" -o /tmp/d
 [MITM]         -> mitmproxy 对 HTTPS CONNECT 流量的解密能力
 hostname       -> rewrite_rules.py 里的 CONFIGURED_HOSTS
 ```
+
+## Ubuntu 部署参考
+
+生产环境建议把 FastAPI 后端作为 systemd 服务运行，前端用 Vite build 后交给 Nginx 静态托管。不要把 Nikki 密钥或代理账号写进 Git；在控制台页面填写后点 `保存配置`，配置会留在浏览器 localStorage 中。
+
+安装基础环境：
+
+```bash
+sudo apt update
+sudo apt install -y git curl nginx python3 python3-venv python3-pip
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+拉取代码并安装依赖：
+
+```bash
+sudo mkdir -p /opt/daoyufan /var/lib/daoyufan
+sudo chown -R "$USER":"$USER" /opt/daoyufan /var/lib/daoyufan
+git clone git@github.com:since25/daohuanmeng.git /opt/daoyufan
+cd /opt/daoyufan
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cd frontend
+npm ci
+VITE_API_BASE=/api npm run build
+```
+
+创建后端 systemd 服务：
+
+```bash
+sudo tee /etc/systemd/system/daoyufan-api.service >/dev/null <<'EOF'
+[Unit]
+Description=DaoyuFan Console API
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/daoyufan
+ExecStart=/opt/daoyufan/.venv/bin/python run_backend.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=DAOYUFAN_HOST=127.0.0.1
+Environment=DAOYUFAN_PORT=8765
+Environment=DAOYUFAN_DB_PATH=/var/lib/daoyufan/console.sqlite3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now daoyufan-api
+```
+
+配置 Nginx：
+
+```bash
+sudo tee /etc/nginx/sites-available/daoyufan >/dev/null <<'EOF'
+server {
+    listen 80;
+    server_name _;
+
+    root /opt/daoyufan/frontend/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8765/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/daoyufan /etc/nginx/sites-enabled/daoyufan
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+更新部署：
+
+```bash
+cd /opt/daoyufan
+git pull
+.venv/bin/python -m pip install -r requirements.txt
+cd frontend
+npm ci
+VITE_API_BASE=/api npm run build
+sudo systemctl restart daoyufan-api
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+如果 Ubuntu 服务器不在 Nikki 网关所在内网，页面里的 `文章处理代理` 和 `Nikki API` 必须填写服务器可访问的地址；`127.0.0.1` 在服务器上指的是 Ubuntu 自己，不是你的 Mac。

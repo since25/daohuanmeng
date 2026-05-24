@@ -35,7 +35,7 @@ cat >"${PLIST_FILE}" <<PLIST
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd "${SERVICE_DIR}" &amp;&amp; exec "${VENV_DIR}/bin/mitmdump" --listen-host 127.0.0.1 --listen-port "${PROXY_PORT}" --set ssl_insecure=true -s "${SERVICE_DIR}/rewrite_addon.py"</string>
+    <string>cd "${SERVICE_DIR}" &amp;&amp; exec "${VENV_DIR}/bin/mitmdump" --listen-host 127.0.0.1 --listen-port "${PROXY_PORT}" --set ssl_insecure=true --set connection_strategy=lazy -s "${SERVICE_DIR}/rewrite_addon.py"</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

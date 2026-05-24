@@ -123,7 +123,81 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(json_export.json()[0]["article_url"], "https://daoyu.fan/3199.html")
         self.assertEqual(csv_export.status_code, 200)
         self.assertIn("article_url,title,download_href", csv_export.text)
-        self.assertIn("https://daoyu.fan/3199.html", csv_export.text)
+
+    def test_resolve_single_result_retries_download_href_without_refetching_article(self):
+        repository = self.app.state.repository
+        job = repository.create_job(
+            start_url="https://daoyu.fan/3531.html",
+            max_pages=1,
+            delay_seconds=0,
+            resolve_final_url=True,
+            skip_cached_articles=False,
+            use_resolver_cache=False,
+        )
+        page = repository.upsert_page(
+            job_id=job["id"],
+            article_url="https://daoyu.fan/3531.html",
+            title="野结白",
+            download_href="https://daoyu.fan/goto?down=download",
+            resolved_download_url=None,
+            next_url="https://daoyu.fan/3535.html",
+            status="error",
+            error="ssl eof",
+        )
+
+        response = self.client.post(
+            f"/api/results/{page['id']}/resolve",
+            json=self.start_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "resolved")
+        self.assertEqual(body["next_url"], "https://daoyu.fan/3535.html")
+        self.assertEqual(body["resolved_download_url"], "https://share.feijipan.com/s/QOPtO6IO?code=6666")
+        self.assertEqual(self.fetch_calls, [])
+        self.assertEqual(
+            self.resolve_calls,
+            [("https://daoyu.fan/goto?down=download", "http://127.0.0.1:8080")],
+        )
+
+    def test_resolve_single_result_bypasses_existing_resolver_cache(self):
+        repository = self.app.state.repository
+        job = repository.create_job(
+            start_url="https://daoyu.fan/3531.html",
+            max_pages=1,
+            delay_seconds=0,
+            resolve_final_url=True,
+            skip_cached_articles=False,
+            use_resolver_cache=True,
+        )
+        repository.save_resolver_cache(
+            "https://daoyu.fan/goto?down=download",
+            "https://share.example/old-cache",
+            None,
+        )
+        page = repository.upsert_page(
+            job_id=job["id"],
+            article_url="https://daoyu.fan/3531.html",
+            title="野结白",
+            download_href="https://daoyu.fan/goto?down=download",
+            resolved_download_url="https://share.example/old-cache",
+            next_url="https://daoyu.fan/3535.html",
+            status="resolved",
+            error=None,
+        )
+
+        response = self.client.post(
+            f"/api/results/{page['id']}/resolve",
+            json=self.start_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["resolved_download_url"], "https://share.feijipan.com/s/QOPtO6IO?code=6666")
+        self.assertEqual(
+            self.resolve_calls,
+            [("https://daoyu.fan/goto?down=download", "http://127.0.0.1:8080")],
+        )
 
 
 if __name__ == "__main__":

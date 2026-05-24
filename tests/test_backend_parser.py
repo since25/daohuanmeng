@@ -48,6 +48,22 @@ class BackendParserTest(unittest.TestCase):
         self.assertEqual(page["next_url"], "https://daoyu.fan/3200.html")
         self.assertIsNone(page["resolved_download_url"])
 
+    def test_parse_article_page_uses_only_download_button_when_single_button_exists(self):
+        html = """
+        <html>
+          <body>
+            <h2 class="post-title mb-2 mb-lg-3">单按钮页面</h2>
+            <div class="btn-group">
+              <a href="https://daoyu.fan/goto?down=only">压缩包</a>
+            </div>
+          </body>
+        </html>
+        """
+
+        page = parse_article_page(html, "https://daoyu.fan/4000.html")
+
+        self.assertEqual(page["download_href"], "https://daoyu.fan/goto?down=only")
+
     def test_parse_article_page_resolves_relative_next_url(self):
         page = parse_article_page(RELATIVE_NEXT_HTML, "https://daoyu.fan/3200.html")
 

@@ -149,11 +149,16 @@ button,
   width: 18px;
 }
 
-.command-row {
+.command-row,
+.config-actions {
   display: grid;
   gap: 8px;
   grid-template-columns: 1fr 1fr;
   margin-top: 6px;
+}
+
+.config-actions {
+  margin-top: 0;
 }
 
 button,
@@ -167,6 +172,12 @@ button.primary {
   background: #0b6f84;
   border-color: #0b6f84;
   color: #ffffff;
+}
+
+button.compact-button {
+  min-height: 32px;
+  padding: 5px 8px;
+  white-space: nowrap;
 }
 
 button:disabled {
@@ -213,7 +224,7 @@ button:disabled {
 .cache-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
 }
 
 .metric {
@@ -306,6 +317,11 @@ th {
   color: #9b2f16;
 }
 
+.status-pill.resolving {
+  background: #e5efff;
+  color: #2457a6;
+}
+
 .error-panel {
   background: #ffffff;
   border: 1px solid #d7e0e5;
@@ -334,7 +350,7 @@ th {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(220px, 1fr) 180px;
+  grid-template-columns: minmax(220px, 1fr) 180px 180px 160px 120px;
 }
 
 .search-box {
@@ -360,6 +376,22 @@ th {
   border-bottom: 1px solid #e6ecef;
   display: flex;
   justify-content: space-between;
+}
+
+.pagination-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.pagination-row span {
+  color: #52626a;
+}
+
+.pagination-row div {
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 900px) {

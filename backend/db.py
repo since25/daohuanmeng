@@ -381,7 +381,7 @@ class Repository:
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO post_pages (
+                INSERT INTO post_pages (
                     job_id,
                     article_url,
                     title,
@@ -394,6 +394,16 @@ class Repository:
                     resolved_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(article_url) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    title = excluded.title,
+                    download_href = excluded.download_href,
+                    resolved_download_url = excluded.resolved_download_url,
+                    next_url = excluded.next_url,
+                    status = excluded.status,
+                    error = excluded.error,
+                    fetched_at = excluded.fetched_at,
+                    resolved_at = excluded.resolved_at
                 """,
                 (
                     job_id,
@@ -425,6 +435,21 @@ class Repository:
         with self._connection() as own_connection:
             return self.get_page_by_url(article_url, connection=own_connection)
 
+    def get_page_by_id(
+        self,
+        page_id: int,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> sqlite3.Row | None:
+        if connection is not None:
+            return connection.execute(
+                "SELECT * FROM post_pages WHERE id = ?",
+                (page_id,),
+            ).fetchone()
+
+        with self._connection() as own_connection:
+            return self.get_page_by_id(page_id, connection=own_connection)
+
     def list_pages(
         self,
         *,
@@ -452,13 +477,32 @@ class Repository:
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO resolver_cache (
+                INSERT INTO resolver_cache (
                     download_href,
                     resolved_download_url,
                     error,
                     resolved_at
                 )
                 VALUES (?, ?, ?, ?)
+                ON CONFLICT(download_href) DO UPDATE SET
+                    resolved_download_url = CASE
+                        WHEN resolver_cache.resolved_download_url IS NULL
+                            AND excluded.resolved_download_url IS NOT NULL
+                        THEN excluded.resolved_download_url
+                        ELSE resolver_cache.resolved_download_url
+                    END,
+                    error = CASE
+                        WHEN resolver_cache.resolved_download_url IS NULL
+                            AND excluded.resolved_download_url IS NOT NULL
+                        THEN NULL
+                        ELSE resolver_cache.error
+                    END,
+                    resolved_at = CASE
+                        WHEN resolver_cache.resolved_download_url IS NULL
+                            AND excluded.resolved_download_url IS NOT NULL
+                        THEN excluded.resolved_at
+                        ELSE resolver_cache.resolved_at
+                    END
                 """,
                 (download_href, resolved_download_url, error, _utc_now()),
             )
