@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -45,6 +46,16 @@ def create_app(
     worker_lock = threading.Lock()
 
     app = FastAPI(title="DaoyuFan Crawler Console")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+        ],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.repository = repository
     app.state.runner = runner
 
