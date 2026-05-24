@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -78,6 +79,29 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(
             response.headers["access-control-allow-origin"],
             "http://127.0.0.1:5175",
+        )
+
+    def test_cors_origin_regex_can_be_configured_for_server_frontend(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "daoyufan.sqlite3"
+            with patch.dict(
+                "os.environ",
+                {"DAOYUFAN_CORS_ORIGIN_REGEX": r"^http://192\.168\.7\.10:[0-9]+$"},
+            ):
+                client = TestClient(create_app(db_path=db_path, auto_run=False))
+
+            response = client.options(
+                "/api/health",
+                headers={
+                    "Origin": "http://192.168.7.10:5173",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "http://192.168.7.10:5173",
         )
 
     def test_start_rejects_second_active_job(self):

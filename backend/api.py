@@ -52,11 +52,15 @@ def create_app(
     repository.initialize()
     runner = JobRunner(repository, fetch_html=fetch_html, resolve_url=resolve_url)
     worker_lock = threading.Lock()
+    cors_origin_regex = os.environ.get(
+        "DAOYUFAN_CORS_ORIGIN_REGEX",
+        r"^http://(127\.0\.0\.1|localhost):[0-9]+$",
+    )
 
     app = FastAPI(title="DaoyuFan Crawler Console")
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"^http://(127\.0\.0\.1|localhost):[0-9]+$",
+        allow_origin_regex=cors_origin_regex,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
