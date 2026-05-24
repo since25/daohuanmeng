@@ -229,6 +229,64 @@ https://daoyu.fan/4687.html
 ~/Library/Application Support/daoyufan-mitm/logs/
 ```
 
+## React 本地控制台
+
+控制台把文章链抓取、SQLite 去重缓存、最终网盘链接解析、暂停/恢复/停止和 JSON/CSV 导出放在一个本地页面里。它仍然复用上面的本地 MITM 代理，默认代理地址是：
+
+```text
+http://127.0.0.1:8080
+```
+
+启动代理：
+
+```bash
+./start_mitm_proxy.sh
+```
+
+启动后端和前端控制台：
+
+```bash
+./start_console.sh
+```
+
+打开：
+
+```text
+http://127.0.0.1:5173
+```
+
+默认起始页是：
+
+```text
+https://daoyu.fan/3199.html
+```
+
+控制台后端运行在：
+
+```text
+http://127.0.0.1:8765
+```
+
+常用接口：
+
+```text
+GET  /api/health
+POST /api/job/start
+POST /api/job/pause
+POST /api/job/resume
+POST /api/job/stop
+GET  /api/job
+GET  /api/results
+GET  /api/export/json
+GET  /api/export/csv
+```
+
+停止控制台时，在运行 `./start_console.sh` 的终端按 `Ctrl-C`。停止代理：
+
+```bash
+./stop_mitm_proxy.sh
+```
+
 ## 手动测试路径
 
 创建环境：
