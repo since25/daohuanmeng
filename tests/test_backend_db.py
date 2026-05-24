@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,11 +15,8 @@ class BackendDbTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_initialize_is_idempotent(self):
-        self.repo.initialize()
-        self.repo.initialize()
-
-        job = self.repo.create_job(
+    def create_job(self):
+        return self.repo.create_job(
             start_url="https://daoyu.fan/3199.html",
             max_pages=25,
             delay_seconds=1.5,
@@ -27,12 +25,20 @@ class BackendDbTest(unittest.TestCase):
             use_resolver_cache=True,
         )
 
+    def test_initialize_is_idempotent(self):
+        self.repo.initialize()
+        self.repo.initialize()
+
+        job = self.create_job()
+
         self.assertEqual(job["start_url"], "https://daoyu.fan/3199.html")
 
     def test_unique_article_url_reuses_row_and_preserves_first_title(self):
         self.repo.initialize()
+        job = self.create_job()
 
         first = self.repo.upsert_page(
+            job_id=job["id"],
             article_url="https://daoyu.fan/3199.html",
             title="First title",
             download_href="https://daoyu.fan/goto?down=first",
@@ -42,6 +48,7 @@ class BackendDbTest(unittest.TestCase):
             error=None,
         )
         second = self.repo.upsert_page(
+            job_id=job["id"],
             article_url="https://daoyu.fan/3199.html",
             title="Changed title",
             download_href="https://daoyu.fan/goto?down=changed",
@@ -59,6 +66,41 @@ class BackendDbTest(unittest.TestCase):
         self.assertEqual(row["next_url"], "https://daoyu.fan/3200.html")
         self.assertEqual(row["status"], "fetched")
         self.assertIsNone(row["error"])
+
+    def test_upsert_page_requires_job_id(self):
+        self.repo.initialize()
+
+        with self.assertRaises(TypeError):
+            self.repo.upsert_page(
+                article_url="https://daoyu.fan/3199.html",
+                status="fetched",
+            )
+
+    def test_upsert_page_rejects_null_job_id(self):
+        self.repo.initialize()
+
+        with self.assertRaises(ValueError):
+            self.repo.upsert_page(
+                job_id=None,
+                article_url="https://daoyu.fan/3199.html",
+                status="fetched",
+            )
+
+    def test_post_pages_schema_rejects_null_job_id(self):
+        self.repo.initialize()
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO post_pages (article_url, status)
+                    VALUES (?, ?)
+                    """,
+                    ("https://daoyu.fan/3199.html", "fetched"),
+                )
+        finally:
+            connection.close()
 
     def test_resolver_cache_reuses_download_href_and_preserves_first_resolved_url(self):
         self.repo.initialize()

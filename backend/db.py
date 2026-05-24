@@ -57,7 +57,7 @@ class Repository:
 
                 CREATE TABLE IF NOT EXISTS post_pages (
                     id INTEGER PRIMARY KEY,
-                    job_id INTEGER,
+                    job_id INTEGER NOT NULL,
                     article_url TEXT NOT NULL UNIQUE,
                     title TEXT,
                     download_href TEXT,
@@ -158,6 +158,7 @@ class Repository:
     def upsert_page(
         self,
         *,
+        job_id: int,
         article_url: str,
         title: str | None = None,
         download_href: str | None = None,
@@ -165,10 +166,12 @@ class Repository:
         next_url: str | None = None,
         status: str = "pending",
         error: str | None = None,
-        job_id: int | None = None,
         fetched_at: str | None = None,
         resolved_at: str | None = None,
     ) -> sqlite3.Row:
+        if job_id is None:
+            raise ValueError("job_id is required")
+
         with self._connection() as connection:
             connection.execute(
                 """
