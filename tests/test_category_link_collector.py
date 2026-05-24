@@ -1,8 +1,15 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import category_link_collector as collector
-from category_link_collector import extract_category_links, parse_page_range
+from category_link_collector import (
+    collect_category_links,
+    extract_category_links,
+    parse_page_range,
+)
 
 
 class CategoryLinkCollectorTest(unittest.TestCase):
@@ -75,6 +82,56 @@ class CategoryLinkCollectorTest(unittest.TestCase):
         proxy_handler.assert_called_once_with({})
         build_opener.assert_called_once_with("direct-proxy-handler")
         opener.open.assert_called_once()
+
+    def test_collect_writes_incremental_json_after_each_successful_page(self):
+        html_by_url = {
+            "https://daoyu.fan/category/dou-yin-fan-cha/page/1": """
+            <h2 class="entry-title">
+              <a href="https://daoyu.fan/100.html" title="第一页">第一页</a>
+            </h2>
+            """,
+            "https://daoyu.fan/category/dou-yin-fan-cha/page/2": """
+            <h2 class="entry-title">
+              <a href="https://daoyu.fan/200.html" title="第二页">第二页</a>
+            </h2>
+            """,
+        }
+
+        def fake_fetch(url: str) -> str:
+            if url not in html_by_url:
+                raise RuntimeError("temporary ssl failure")
+            return html_by_url[url]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "links.json"
+            with (
+                patch.object(collector, "fetch_html", side_effect=fake_fetch),
+                patch.object(collector.time, "sleep"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "temporary ssl failure"):
+                    collect_category_links(
+                        base_url="https://daoyu.fan/category/dou-yin-fan-cha/page/{page}",
+                        page_start=1,
+                        page_end=3,
+                        sleep_seconds=30,
+                        output_path=output_path,
+                    )
+
+            self.assertEqual(
+                json.loads(output_path.read_text(encoding="utf-8")),
+                [
+                    {
+                        "source_page": 1,
+                        "title": "第一页",
+                        "url": "https://daoyu.fan/100.html",
+                    },
+                    {
+                        "source_page": 2,
+                        "title": "第二页",
+                        "url": "https://daoyu.fan/200.html",
+                    },
+                ],
+            )
 
 
 if __name__ == "__main__":

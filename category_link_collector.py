@@ -88,6 +88,16 @@ def fetch_html(url: str, *, timeout: float = 20) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
+def write_links_json(output_path: Path, links: list[dict[str, Any]]) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = output_path.with_name(f".{output_path.name}.tmp")
+    temporary_path.write_text(
+        json.dumps(links, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary_path.replace(output_path)
+
+
 def parse_page_range(value: str) -> tuple[int, int]:
     parts = value.split(":", 1)
     if len(parts) != 2:
@@ -105,14 +115,20 @@ def collect_category_links(
     page_start: int,
     page_end: int,
     sleep_seconds: float,
+    output_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
     for page in range(page_start, page_end + 1):
         page_url = base_url.format(page=page)
         html = fetch_html(page_url)
-        collected.extend(
-            extract_category_links(html, page_url=page_url, source_page=page)
-        )
+        page_links = extract_category_links(html, page_url=page_url, source_page=page)
+        collected.extend(page_links)
+        if output_path is not None:
+            write_links_json(output_path, collected)
+            print(
+                f"page {page}: collected {len(page_links)} links, "
+                f"wrote {len(collected)} total to {output_path}"
+            )
         if page < page_end and sleep_seconds > 0:
             time.sleep(sleep_seconds)
     return collected
@@ -149,17 +165,13 @@ def main(argv=None) -> int:
         if page_start < 1 or page_end < page_start:
             parser.error("--page-end must be greater than or equal to --page-start")
 
+    output_path = Path(args.output)
     links = collect_category_links(
         base_url=args.base_url,
         page_start=page_start,
         page_end=page_end,
         sleep_seconds=args.sleep,
-    )
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(links, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        output_path=output_path,
     )
     print(f"wrote {len(links)} links to {output_path}")
     return 0
