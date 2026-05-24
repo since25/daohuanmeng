@@ -1,0 +1,9 @@
+.venv/
+logs/
+.omx/
+.run/
+.chrome-mitm-profile/
+.superpowers/
+__pycache__/
+tests/__pycache__/
+.pytest_cache/
