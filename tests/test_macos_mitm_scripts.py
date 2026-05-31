@@ -32,11 +32,25 @@ class MacosMitmScriptsTest(unittest.TestCase):
                 "--listen-host",
                 "127.0.0.1",
                 "--listen-port",
+                "connection_strategy=lazy",
                 "rewrite_addon.py",
                 "mitmproxy.plist",
                 "Installing mitmproxy dependencies",
                 "--no-cache-dir",
                 "Waiting for mitmproxy",
+            ],
+        )
+
+    def test_console_script_manages_proxy_lifecycle(self):
+        self.assert_executable_script_contains(
+            "start_console.sh",
+            [
+                'START_PROXY="${START_PROXY:-1}"',
+                '"${ROOT_DIR}/start_mitm_proxy.sh"',
+                '"${ROOT_DIR}/stop_mitm_proxy.sh"',
+                "PROXY_PORT",
+                "START_PROXY=0",
+                "tail -n 0 -F",
             ],
         )
 

@@ -56,10 +56,17 @@ def parse_article_page(html: str, page_url: str) -> dict[str, object]:
         if button.get("href")
     ]
 
+    if len(download_hrefs) >= 2:
+        download_href = download_hrefs[1]
+    elif len(download_hrefs) == 1:
+        download_href = download_hrefs[0]
+    else:
+        download_href = None
+
     return {
         "url": page_url,
         "title": parser.title,
-        "download_href": download_hrefs[1] if len(download_hrefs) >= 2 else None,
+        "download_href": download_href,
         "resolved_download_url": None,
         "next_url": urljoin(page_url, parser.next_href) if parser.next_href else None,
     }

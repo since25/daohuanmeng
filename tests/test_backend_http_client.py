@@ -11,7 +11,7 @@ class HttpClientTest(unittest.TestCase):
         response.headers.get_content_charset.return_value = "utf-8"
         response.read.return_value = "<html>第一页</html>".encode("utf-8")
 
-        client = HttpClient(proxy="http://127.0.0.1:8080")
+        client = HttpClient(proxy="http://127.0.0.1:28880")
         html = client.fetch_html("https://daoyu.fan/3199.html")
 
         self.assertEqual(html, "<html>第一页</html>")
@@ -29,7 +29,7 @@ class HttpClientTest(unittest.TestCase):
         )
         response.geturl.return_value = "https://huanyu-proxy.daoyufan.workers.dev/goto/?down=bbb"
 
-        client = HttpClient(proxy="http://127.0.0.1:8080")
+        client = HttpClient(proxy="http://127.0.0.1:28880")
         final_url = client.resolve_final_url("https://daoyu.fan/goto?down=bbb")
 
         self.assertEqual(final_url, "https://share.feijipan.com/s/QOPtO6IO?code=6666")
@@ -41,7 +41,7 @@ class HttpClientTest(unittest.TestCase):
         response.read.return_value = b"<html></html>"
         response.geturl.return_value = "https://example.com/final"
 
-        client = HttpClient(proxy="http://127.0.0.1:8080")
+        client = HttpClient(proxy="http://127.0.0.1:28880")
         final_url = client.resolve_final_url("https://daoyu.fan/goto?down=bbb")
 
         self.assertEqual(final_url, "https://example.com/final")

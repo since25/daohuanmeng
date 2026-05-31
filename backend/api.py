@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
+import os
 import tempfile
 import threading
 from collections.abc import Callable
@@ -13,23 +15,42 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend.db import Repository
+from backend.db import Repository, _utc_now
 from backend.job_runner import JobRunner
 from backend.models import StartJobOptions
 
 
 FetchHtmlCallable = Callable[[str, str | None], str]
 ResolveUrlCallable = Callable[[str, str | None], str]
+logger = logging.getLogger(__name__)
+PERSISTENT_DB_PATH = Path("/var/lib/daoyufan/console.sqlite3")
 
 
 class StartJobRequest(BaseModel):
     start_url: str
     max_pages: int = Field(default=25, ge=1)
-    delay_seconds: float = Field(default=0.5, ge=0)
-    proxy: str | None = "http://127.0.0.1:8080"
+    delay_seconds: float = Field(default=2, ge=0)
+    proxy: str | None = "http://127.0.0.1:28880"
     resolve_final_url: bool = True
     skip_cached_articles: bool = True
     use_resolver_cache: bool = True
+    resolver_proxy: str | None = None
+    rewrite_resolver_url: bool = False
+    nikki_api_base: str | None = None
+    nikki_api_secret: str | None = None
+    nikki_proxy_group: str | None = None
+    nikki_delay_test_url: str = "https://www.gstatic.com/generate_204"
+    nikki_delay_timeout_ms: int = Field(default=5000, ge=500)
+
+
+class BatchImportItem(BaseModel):
+    title: str | None = None
+    url: str
+    source_page: int | None = None
+
+
+class StartBatchJobRequest(StartJobRequest):
+    items: list[BatchImportItem] = Field(min_length=1)
 
 
 def create_app(
@@ -44,11 +65,15 @@ def create_app(
     repository.initialize()
     runner = JobRunner(repository, fetch_html=fetch_html, resolve_url=resolve_url)
     worker_lock = threading.Lock()
+    cors_origin_regex = os.environ.get(
+        "DAOYUFAN_CORS_ORIGIN_REGEX",
+        r"^http://(127\.0\.0\.1|localhost):[0-9]+$",
+    )
 
     app = FastAPI(title="DaoyuFan Crawler Console")
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"^http://(127\.0\.0\.1|localhost):[0-9]+$",
+        allow_origin_regex=cors_origin_regex,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -62,7 +87,18 @@ def create_app(
 
         def worker() -> None:
             with worker_lock:
-                runner.tick_until_idle_for_tests()
+                try:
+                    runner.tick_until_idle_for_tests()
+                except Exception as exc:
+                    logger.exception("background job worker crashed")
+                    active_job = repository.get_active_job()
+                    if active_job is not None:
+                        repository.update_job(
+                            active_job["id"],
+                            status="failed",
+                            error=str(exc),
+                            finished_at=_utc_now(),
+                        )
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
@@ -90,7 +126,41 @@ def create_app(
                     resolve_final_url=payload.resolve_final_url,
                     skip_cached_articles=payload.skip_cached_articles,
                     use_resolver_cache=payload.use_resolver_cache,
+                    resolver_proxy=payload.resolver_proxy,
+                    rewrite_resolver_url=payload.rewrite_resolver_url,
+                    nikki_api_base=payload.nikki_api_base,
+                    nikki_api_secret=payload.nikki_api_secret,
+                    nikki_proxy_group=payload.nikki_proxy_group,
+                    nikki_delay_test_url=payload.nikki_delay_test_url,
+                    nikki_delay_timeout_ms=payload.nikki_delay_timeout_ms,
                 )
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        run_until_idle_in_background()
+        return state
+
+    @app.post("/api/job/start-batch")
+    def start_batch_job(payload: StartBatchJobRequest) -> dict[str, Any]:
+        try:
+            state = runner.start_batch(
+                StartJobOptions(
+                    start_url=payload.start_url,
+                    max_pages=payload.max_pages,
+                    delay_seconds=payload.delay_seconds,
+                    proxy=payload.proxy,
+                    resolve_final_url=payload.resolve_final_url,
+                    skip_cached_articles=payload.skip_cached_articles,
+                    use_resolver_cache=payload.use_resolver_cache,
+                    resolver_proxy=payload.resolver_proxy,
+                    rewrite_resolver_url=payload.rewrite_resolver_url,
+                    nikki_api_base=payload.nikki_api_base,
+                    nikki_api_secret=payload.nikki_api_secret,
+                    nikki_proxy_group=payload.nikki_proxy_group,
+                    nikki_delay_test_url=payload.nikki_delay_test_url,
+                    nikki_delay_timeout_ms=payload.nikki_delay_timeout_ms,
+                ),
+                [item.model_dump() for item in payload.items],
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -124,6 +194,33 @@ def create_app(
     def get_results() -> list[dict[str, Any]]:
         return [_serialize_row(row) for row in repository.list_pages()]
 
+    @app.post("/api/results/{page_id}/resolve")
+    def resolve_result(page_id: int, payload: StartJobRequest) -> dict[str, Any]:
+        try:
+            row = runner.resolve_page(
+                page_id,
+                StartJobOptions(
+                    start_url=payload.start_url,
+                    max_pages=payload.max_pages,
+                    delay_seconds=payload.delay_seconds,
+                    proxy=payload.proxy,
+                    resolve_final_url=payload.resolve_final_url,
+                    skip_cached_articles=payload.skip_cached_articles,
+                    use_resolver_cache=payload.use_resolver_cache,
+                    resolver_proxy=payload.resolver_proxy,
+                    rewrite_resolver_url=payload.rewrite_resolver_url,
+                    nikki_api_base=payload.nikki_api_base,
+                    nikki_api_secret=payload.nikki_api_secret,
+                    nikki_proxy_group=payload.nikki_proxy_group,
+                    nikki_delay_test_url=payload.nikki_delay_test_url,
+                    nikki_delay_timeout_ms=payload.nikki_delay_timeout_ms,
+                ),
+            )
+        except RuntimeError as exc:
+            status_code = 404 if str(exc) == "page not found" else 409
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        return _serialize_row(row)
+
     @app.get("/api/export/json")
     def export_json() -> list[dict[str, Any]]:
         return get_results()
@@ -156,6 +253,11 @@ def create_app(
 
 
 def _default_db_path() -> Path:
+    env_path = os.environ.get("DAOYUFAN_DB_PATH")
+    if env_path:
+        return Path(env_path)
+    if PERSISTENT_DB_PATH.exists():
+        return PERSISTENT_DB_PATH
     return Path(tempfile.gettempdir()) / "daoyufan-console.sqlite3"
 
 

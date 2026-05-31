@@ -41,6 +41,7 @@ class Repository:
                 """
                 CREATE TABLE IF NOT EXISTS crawl_jobs (
                     id INTEGER PRIMARY KEY,
+                    job_type TEXT NOT NULL DEFAULT 'chain',
                     start_url TEXT NOT NULL,
                     current_url TEXT,
                     max_pages INTEGER NOT NULL,
@@ -56,7 +57,8 @@ class Repository:
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     finished_at TEXT,
-                    error TEXT
+                    error TEXT,
+                    options_json TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS post_pages (
@@ -81,9 +83,40 @@ class Repository:
                     error TEXT,
                     resolved_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS batch_items (
+                    id INTEGER PRIMARY KEY,
+                    job_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    source_page INTEGER,
+                    title TEXT,
+                    article_url TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    FOREIGN KEY (job_id) REFERENCES crawl_jobs(id),
+                    UNIQUE(job_id, article_url)
+                );
                 """
             )
+            self._ensure_column(connection, "crawl_jobs", "job_type", "TEXT NOT NULL DEFAULT 'chain'")
+            self._ensure_column(connection, "crawl_jobs", "options_json", "TEXT")
             self._migrate_post_pages_job_id_not_null(connection)
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _migrate_post_pages_job_id_not_null(self, connection: sqlite3.Connection) -> None:
         columns = {
@@ -206,12 +239,15 @@ class Repository:
         resolve_final_url: bool,
         skip_cached_articles: bool,
         use_resolver_cache: bool,
+        job_type: str = "chain",
+        options_json: str | None = None,
     ) -> sqlite3.Row:
         with self._connection() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO crawl_jobs (
                     start_url,
+                    job_type,
                     max_pages,
                     delay_seconds,
                     resolve_final_url,
@@ -222,21 +258,94 @@ class Repository:
                     success_count,
                     error_count,
                     cache_hit_count,
-                    created_at
+                    created_at,
+                    options_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0, 0, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, 0, 0, 0, ?, ?)
                 """,
                 (
                     start_url,
+                    job_type,
                     max_pages,
                     delay_seconds,
                     int(resolve_final_url),
                     int(skip_cached_articles),
                     int(use_resolver_cache),
                     _utc_now(),
+                    options_json,
                 ),
             )
             return self.get_job(cursor.lastrowid, connection=connection)
+
+    def add_batch_items(self, job_id: int, items: list[dict[str, object]]) -> None:
+        now = _utc_now()
+        with self._connection() as connection:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO batch_items (
+                    job_id,
+                    position,
+                    source_page,
+                    title,
+                    article_url,
+                    status,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                [
+                    (
+                        job_id,
+                        index,
+                        item.get("source_page"),
+                        item.get("title"),
+                        item["url"],
+                        now,
+                    )
+                    for index, item in enumerate(items)
+                ],
+            )
+
+    def get_next_batch_item(self, job_id: int) -> sqlite3.Row | None:
+        with self._connection() as connection:
+            return connection.execute(
+                """
+                SELECT * FROM batch_items
+                WHERE job_id = ? AND status = 'pending'
+                ORDER BY position ASC, id ASC
+                LIMIT 1
+                """,
+                (job_id,),
+            ).fetchone()
+
+    def peek_next_batch_item_after(self, job_id: int, position: int) -> sqlite3.Row | None:
+        with self._connection() as connection:
+            return connection.execute(
+                """
+                SELECT * FROM batch_items
+                WHERE job_id = ? AND status = 'pending' AND position > ?
+                ORDER BY position ASC, id ASC
+                LIMIT 1
+                """,
+                (job_id, position),
+            ).fetchone()
+
+    def update_batch_item(
+        self,
+        item_id: int,
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                """
+                UPDATE batch_items
+                SET status = ?, error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, error, _utc_now(), item_id),
+            )
 
     def get_job(
         self,
@@ -381,7 +490,7 @@ class Repository:
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO post_pages (
+                INSERT INTO post_pages (
                     job_id,
                     article_url,
                     title,
@@ -394,6 +503,16 @@ class Repository:
                     resolved_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(article_url) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    title = excluded.title,
+                    download_href = excluded.download_href,
+                    resolved_download_url = excluded.resolved_download_url,
+                    next_url = excluded.next_url,
+                    status = excluded.status,
+                    error = excluded.error,
+                    fetched_at = excluded.fetched_at,
+                    resolved_at = excluded.resolved_at
                 """,
                 (
                     job_id,
@@ -425,6 +544,21 @@ class Repository:
         with self._connection() as own_connection:
             return self.get_page_by_url(article_url, connection=own_connection)
 
+    def get_page_by_id(
+        self,
+        page_id: int,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> sqlite3.Row | None:
+        if connection is not None:
+            return connection.execute(
+                "SELECT * FROM post_pages WHERE id = ?",
+                (page_id,),
+            ).fetchone()
+
+        with self._connection() as own_connection:
+            return self.get_page_by_id(page_id, connection=own_connection)
+
     def list_pages(
         self,
         *,
@@ -452,13 +586,32 @@ class Repository:
         with self._connection() as connection:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO resolver_cache (
+                INSERT INTO resolver_cache (
                     download_href,
                     resolved_download_url,
                     error,
                     resolved_at
                 )
                 VALUES (?, ?, ?, ?)
+                ON CONFLICT(download_href) DO UPDATE SET
+                    resolved_download_url = CASE
+                        WHEN resolver_cache.resolved_download_url IS NULL
+                            AND excluded.resolved_download_url IS NOT NULL
+                        THEN excluded.resolved_download_url
+                        ELSE resolver_cache.resolved_download_url
+                    END,
+                    error = CASE
+                        WHEN resolver_cache.resolved_download_url IS NULL
+                            AND excluded.resolved_download_url IS NOT NULL
+                        THEN NULL
+                        ELSE resolver_cache.error
+                    END,
+                    resolved_at = CASE
+                        WHEN resolver_cache.resolved_download_url IS NULL
+                            AND excluded.resolved_download_url IS NOT NULL
+                        THEN excluded.resolved_at
+                        ELSE resolver_cache.resolved_at
+                    END
                 """,
                 (download_href, resolved_download_url, error, _utc_now()),
             )

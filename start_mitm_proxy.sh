@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_DIR="${HOME}/Library/Application Support/daoyufan-mitm"
 VENV_DIR="${SERVICE_DIR}/.venv"
 LOG_DIR="${SERVICE_DIR}/logs"
-PROXY_PORT="${PROXY_PORT:-8080}"
+PROXY_PORT="${PROXY_PORT:-28880}"
 LABEL="com.daoyufan.mitmproxy"
 LAUNCH_DOMAIN="gui/$(id -u)"
 PLIST_FILE="${SERVICE_DIR}/mitmproxy.plist"
@@ -35,7 +35,7 @@ cat >"${PLIST_FILE}" <<PLIST
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd "${SERVICE_DIR}" &amp;&amp; exec "${VENV_DIR}/bin/mitmdump" --listen-host 127.0.0.1 --listen-port "${PROXY_PORT}" --set ssl_insecure=true -s "${SERVICE_DIR}/rewrite_addon.py"</string>
+    <string>cd "${SERVICE_DIR}" &amp;&amp; exec "${VENV_DIR}/bin/mitmdump" --listen-host 127.0.0.1 --listen-port "${PROXY_PORT}" --set ssl_insecure=true --set connection_strategy=lazy -s "${SERVICE_DIR}/rewrite_addon.py"</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

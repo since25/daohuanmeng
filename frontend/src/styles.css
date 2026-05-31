@@ -15,7 +15,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -114,7 +115,8 @@ button,
 }
 
 .config-form label,
-.toggle-row {
+.toggle-row,
+.batch-import label {
   color: #dbe7eb;
   display: grid;
   gap: 7px;
@@ -122,13 +124,62 @@ button,
 
 .config-form input,
 .filter-row input,
-.filter-row select {
+.filter-row select,
+.batch-import textarea {
   background: #ffffff;
   border: 1px solid #c8d4da;
   color: #182026;
   min-height: 38px;
   padding: 8px 10px;
   width: 100%;
+}
+
+.batch-import {
+  border-top: 1px solid #2d424c;
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+}
+
+.batch-import h3 {
+  font-size: 16px;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.batch-import textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.file-button {
+  align-items: center;
+  border: 1px solid #45616d;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.file-button input {
+  display: none;
+}
+
+.batch-summary {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.batch-preview {
+  color: #a9bac2;
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
 }
 
 .split {
@@ -149,11 +200,16 @@ button,
   width: 18px;
 }
 
-.command-row {
+.command-row,
+.config-actions {
   display: grid;
   gap: 8px;
   grid-template-columns: 1fr 1fr;
   margin-top: 6px;
+}
+
+.config-actions {
+  margin-top: 0;
 }
 
 button,
@@ -167,6 +223,12 @@ button.primary {
   background: #0b6f84;
   border-color: #0b6f84;
   color: #ffffff;
+}
+
+button.compact-button {
+  min-height: 32px;
+  padding: 5px 8px;
+  white-space: nowrap;
 }
 
 button:disabled {
@@ -213,7 +275,7 @@ button:disabled {
 .cache-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
 }
 
 .metric {
@@ -306,6 +368,11 @@ th {
   color: #9b2f16;
 }
 
+.status-pill.resolving {
+  background: #e5efff;
+  color: #2457a6;
+}
+
 .error-panel {
   background: #ffffff;
   border: 1px solid #d7e0e5;
@@ -334,7 +401,7 @@ th {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(220px, 1fr) 180px;
+  grid-template-columns: minmax(220px, 1fr) 180px 180px 160px 120px;
 }
 
 .search-box {
@@ -360,6 +427,22 @@ th {
   border-bottom: 1px solid #e6ecef;
   display: flex;
   justify-content: space-between;
+}
+
+.pagination-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.pagination-row span {
+  color: #52626a;
+}
+
+.pagination-row div {
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 900px) {

@@ -33,7 +33,7 @@ class BackendDbTest(unittest.TestCase):
 
         self.assertEqual(job["start_url"], "https://daoyu.fan/3199.html")
 
-    def test_unique_article_url_reuses_row_and_preserves_first_title(self):
+    def test_unique_article_url_reuses_row_and_updates_latest_state(self):
         self.repo.initialize()
         job = self.create_job()
 
@@ -60,12 +60,12 @@ class BackendDbTest(unittest.TestCase):
         row = self.repo.get_page_by_url("https://daoyu.fan/3199.html")
 
         self.assertEqual(first["id"], second["id"])
-        self.assertEqual(row["title"], "First title")
-        self.assertEqual(row["download_href"], "https://daoyu.fan/goto?down=first")
-        self.assertEqual(row["resolved_download_url"], "https://files.example/first")
-        self.assertEqual(row["next_url"], "https://daoyu.fan/3200.html")
-        self.assertEqual(row["status"], "fetched")
-        self.assertIsNone(row["error"])
+        self.assertEqual(row["title"], "Changed title")
+        self.assertEqual(row["download_href"], "https://daoyu.fan/goto?down=changed")
+        self.assertEqual(row["resolved_download_url"], "https://files.example/changed")
+        self.assertEqual(row["next_url"], "https://daoyu.fan/3201.html")
+        self.assertEqual(row["status"], "resolved")
+        self.assertEqual(row["error"], "changed")
 
     def test_upsert_page_requires_job_id(self):
         self.repo.initialize()
