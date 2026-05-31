@@ -32,6 +32,14 @@ FRONTEND_PORT="${FRONTEND_PORT:-$(find_free_port 5173)}"
 PROXY_PORT="${PROXY_PORT:-28880}"
 START_PROXY="${START_PROXY:-1}"
 MITM_LOG_DIR="${HOME}/Library/Application Support/daoyufan-mitm/logs"
+DEFAULT_PERSISTENT_DB_PATH="/var/lib/daoyufan/console.sqlite3"
+if [ -n "${DAOYUFAN_DB_PATH:-}" ]; then
+  DB_PATH="$DAOYUFAN_DB_PATH"
+elif [ -f "$DEFAULT_PERSISTENT_DB_PATH" ]; then
+  DB_PATH="$DEFAULT_PERSISTENT_DB_PATH"
+else
+  DB_PATH="/tmp/daoyufan-console.sqlite3"
+fi
 PROXY_STARTED=0
 
 cleanup() {
@@ -65,7 +73,7 @@ else
   PROXY_STATUS="not started (START_PROXY=0)"
 fi
 
-PYTHONUNBUFFERED=1 .venv/bin/python run_backend.py > logs/console-backend.log 2>&1 &
+DAOYUFAN_DB_PATH="$DB_PATH" PYTHONUNBUFFERED=1 .venv/bin/python run_backend.py > logs/console-backend.log 2>&1 &
 BACKEND_PID=$!
 
 (cd frontend && exec ./node_modules/.bin/vite --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort > ../logs/console-frontend.log 2>&1) &
@@ -90,6 +98,7 @@ DaoyuFan console is starting.
 Backend:  http://127.0.0.1:$BACKEND_PORT/api/health
 Frontend: http://127.0.0.1:$FRONTEND_PORT
 Proxy:    $PROXY_STATUS
+DB Path:  $DB_PATH
 
 Logs:
   logs/console-backend.log

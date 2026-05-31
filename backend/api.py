@@ -23,6 +23,7 @@ from backend.models import StartJobOptions
 FetchHtmlCallable = Callable[[str, str | None], str]
 ResolveUrlCallable = Callable[[str, str | None], str]
 logger = logging.getLogger(__name__)
+PERSISTENT_DB_PATH = Path("/var/lib/daoyufan/console.sqlite3")
 
 
 class StartJobRequest(BaseModel):
@@ -255,6 +256,8 @@ def _default_db_path() -> Path:
     env_path = os.environ.get("DAOYUFAN_DB_PATH")
     if env_path:
         return Path(env_path)
+    if PERSISTENT_DB_PATH.exists():
+        return PERSISTENT_DB_PATH
     return Path(tempfile.gettempdir()) / "daoyufan-console.sqlite3"
 
 

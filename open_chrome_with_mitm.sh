@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROXY_PORT="${PROXY_PORT:-28880}"
 PROFILE_DIR="${ROOT_DIR}/.chrome-mitm-profile"
-TARGET_URL="${1:-https://daoyu.fan/4687.html}"
+TARGET_URL="${1:-https://huanyuxingqiu.fun/4687.html}"
 
 mkdir -p "${PROFILE_DIR}"
 

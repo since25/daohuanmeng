@@ -64,7 +64,7 @@ wait_for_port "${PROXY_PORT}" "mitmproxy"
 
 echo "Positive case: HTTPS request should be rewritten to the real Worker"
 POSITIVE_BODY_FILE="/tmp/real-worker-mitm-positive-body.html"
-POSITIVE_STATUS="$(curl -skL --proxy "http://127.0.0.1:${PROXY_PORT}" --connect-timeout 10 --max-time 30 -o "${POSITIVE_BODY_FILE}" -w "%{http_code}" "https://daoyu.fan/4687.html")"
+POSITIVE_STATUS="$(curl -skL --proxy "http://127.0.0.1:${PROXY_PORT}" --connect-timeout 10 --max-time 30 -o "${POSITIVE_BODY_FILE}" -w "%{http_code}" "https://huanyuxingqiu.fun/4687.html")"
 
 if [[ "${POSITIVE_STATUS}" != "200" ]]; then
   echo "Expected Worker response status 200, got ${POSITIVE_STATUS}" >&2
@@ -75,7 +75,7 @@ grep -i "<html" "${POSITIVE_BODY_FILE}" >/dev/null
 echo "Worker page returned HTTP ${POSITIVE_STATUS} through mitmproxy."
 
 echo "Negative case: static asset should not be rewritten and should be blocked locally"
-STATIC_STATUS="$(curl -sk --proxy "http://127.0.0.1:${PROXY_PORT}" --connect-timeout 5 --max-time 8 -o /tmp/local-mitm-static-body.txt -w "%{http_code}" "https://daoyu.fan/app.js" || true)"
+STATIC_STATUS="$(curl -sk --proxy "http://127.0.0.1:${PROXY_PORT}" --connect-timeout 5 --max-time 8 -o /tmp/local-mitm-static-body.txt -w "%{http_code}" "https://huanyuxingqiu.fun/app.js" || true)"
 if [[ "${STATIC_STATUS}" != "599" ]]; then
   echo "Expected local safety block status 599, got ${STATIC_STATUS}" >&2
   cat /tmp/local-mitm-static-body.txt >&2
